@@ -1,13 +1,12 @@
 import {select , isCancel} from "@clack/prompts";
 import chalk from "chalk"
 import figlet from "figlet";
-mport { runCliMode } from "../modes/cli";
-import { runTelegramMode } from "../modes/telegram";
 import { runCliMode } from "../modes/cli";
+import { runTelegramMode } from "../modes/telegram";
 
-const BANNER_FONT ='ANSI shadow';
-const SHADOW = chalk.hex("#d26a6a")
-const FACE= chalk.hex("#6a84d2").bold;
+const BANNER_FONT = 'ANSI Shadow';
+const SHADOW = chalk.hex('#37359e');
+const FACE = chalk.hex('#ac9cc1').bold;
 
 function printBannerWithShadow(ascii: string) {
 
@@ -25,17 +24,19 @@ function printBannerWithShadow(ascii: string) {
   console.log();
 }
 
-export async function runfah() {
+
+
+export async function runWakeup() {
     let ascii:string;
     try {
-        ascii = figlet.textSync('fuc code' , {font:BANNER_FONT})
+        ascii = figlet.textSync("fuccode" , {font:BANNER_FONT})
     } catch (error) {
-        ascii = figlet.textSync("fuc code" , {font:"Standard"})
+        ascii = figlet.textSync("fuccode" , {font:"Standard"})
     }
-    
+
     printBannerWithShadow(ascii)
 
-     const mode = await select({
+    const mode = await select({
         message:"Which mode you want to proceed with?",
         options:[
             {value:"cli" , label:"CLI"},
@@ -44,7 +45,7 @@ export async function runfah() {
         ]
     });
 
-    if(isCancel(mode || mode === "exit")){
+    if(isCancel(mode) || mode === "exit"){
         console.log(chalk.dim('\n Goodbye. \n'));
         return;
     }

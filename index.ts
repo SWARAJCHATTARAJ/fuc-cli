@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 
 import {Command} from "commander";
-import { runfah } from "./tui/fah";
+import { runWakeup } from "./tui/fah";
+import { runDoctor } from "./diagnostics/doctor";
 
 const program = new Command();
 
@@ -15,9 +16,16 @@ program
   .description("show the banner and pick cli or telegram mode")
   .action(
     async()=>{
-        await runfah()
+        await runWakeup()
     }
   );
+
+program
+  .command("doctor")
+  .description("check workspace and mode configuration without exposing secrets")
+  .action(() => {
+    if (!runDoctor()) process.exitCode = 1;
+  });
 
 
  await program.parseAsync(process.argv)
