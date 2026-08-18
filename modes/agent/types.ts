@@ -28,6 +28,8 @@ export interface ActionLog {
 export interface AgentConfig {
   codebasePath: string;
   maxFileSizeToRead: number;
+  maxDirectoryDepth: number;
+  maxFilesToProcess: number;
   excludePatterns: string[];
   tools: {
     allowShellExecution: boolean;
@@ -39,7 +41,9 @@ export interface AgentConfig {
 
 export const defaultAgentConfig = (): AgentConfig => ({
   codebasePath: process.cwd(),
-  maxFileSizeToRead: 1024 * 1024 ,
+  maxFileSizeToRead: 1024 * 1024 * 2,
+  maxDirectoryDepth: parseInt(process.env.FUC_MAX_DEPTH || "10", 10),
+  maxFilesToProcess: parseInt(process.env.FUC_MAX_FILES || "5000", 10),
   excludePatterns: [
     'node_modules',
     '.git',

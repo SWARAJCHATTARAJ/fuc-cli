@@ -9,7 +9,7 @@ interface Check {
   detail: string;
 }
 
-function validFreeModel(modelId: string): boolean {
+export function isAllowedModel(modelId: string) {
   return modelId === "openrouter/free" || modelId.endsWith(":free");
 }
 
@@ -56,8 +56,8 @@ export function runDoctor(): boolean {
   const modelId = process.env.OPENROUTER_DEFAULT_MODEL ?? "openrouter/free";
   add(
     "OpenRouter model",
-    validFreeModel(modelId) ? "pass" : "failure",
-    validFreeModel(modelId)
+    isAllowedModel(modelId) ? "pass" : "failure",
+    isAllowedModel(modelId)
       ? `Using ${modelId}.`
       : "OPENROUTER_DEFAULT_MODEL must be openrouter/free or end in :free.",
   );

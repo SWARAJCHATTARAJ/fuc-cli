@@ -9,6 +9,7 @@ import { createWebTools } from "../plan/web-tools.ts";
 import type { Plan, PlanStep } from "../plan/types.ts";
 import { replyMd } from "./text.ts";
 import { finishOrApprove } from "./approval-session.ts";
+import { globalSpinner } from "../../tui/spinner.ts";
 
 function readOnlyConfig(): AgentConfig {
   const c = defaultAgentConfig();
@@ -66,9 +67,38 @@ function extraWebTools(tracker: ActionTracker) {
   return process.env.FIRECRAWL_API_KEY ? createWebTools(tracker) : {};
 }
 
+async function withTelegramSpinner<T>(ctx: any, initialLabel: string, fn: () => Promise<T>): Promise<T> {
+  const chatId = ctx.chat.id;
+  const statusMsg = await ctx.reply(`⏳ ${initialLabel}...`);
+  void ctx.sendChatAction("typing").catch(() => {});
+  const typingInterval = setInterval(() => ctx.sendChatAction("typing").catch(() => {}), 4000);
+  
+  let currentLabel = initialLabel;
+  let startTime = Date.now();
+  
+  const rmListener = globalSpinner.addListener((label) => {
+    currentLabel = label;
+  });
 
-export async function runAsk(ctx:{reply:(t:string , o?:object)=>Promise<unknown>} , question:string){
-     const config = readOnlyConfig();
+  const statusInterval = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const text = `⏳ ${currentLabel} (${elapsed}s)`;
+    ctx.telegram.editMessageText(chatId, statusMsg.message_id, undefined, text).catch(() => {});
+  }, 3500);
+
+  try {
+    return await fn();
+  } finally {
+    clearInterval(typingInterval);
+    clearInterval(statusInterval);
+    rmListener();
+    ctx.telegram.editMessageText(chatId, statusMsg.message_id, undefined, `✅ Finished`).catch(() => {});
+  }
+}
+
+
+export async function runAsk(ctx: any, question: string) {
+  const config = readOnlyConfig();
   const tracker = new ActionTracker();
   const executor = new ToolExecutor(tracker, config);
   const tools = { ...createReadOnlyTools(executor), ...extraWebTools(tracker) };
@@ -77,11 +107,13 @@ export async function runAsk(ctx:{reply:(t:string , o?:object)=>Promise<unknown>
     tools,
   });
 
-  const {text} = await agent.generate({prompt:question});
-  await replyMd(ctx , text || ("no answer"))
+  await withTelegramSpinner(ctx, "Researching", async () => {
+    const {text} = await agent.generate({prompt:question});
+    await replyMd(ctx , text || ("no answer"));
+  });
 }
 
-export async function runAgent(ctx: { reply: (t: string, o?: object) => Promise<unknown> }, chatId: number, goal: string) {
+export async function runAgent(ctx: any, chatId: number, goal: string) {
   const config = defaultAgentConfig();
   const tracker = new ActionTracker();
   const executor = new ToolExecutor(tracker, config);
@@ -90,13 +122,15 @@ export async function runAgent(ctx: { reply: (t: string, o?: object) => Promise<
     ...agentOptions(config, 40),
     tools,
   });
-  const { text } = await agent.generate({ prompt: goal });
-  if (text?.trim()) await replyMd(ctx, text.trim());
- await finishOrApprove(ctx, chatId, tracker, executor, '✅ Done. No file changes were needed.');
+  await withTelegramSpinner(ctx, "Working", async () => {
+    const { text } = await agent.generate({ prompt: goal });
+    if (text?.trim()) await replyMd(ctx, text.trim());
+  });
+  await finishOrApprove(ctx, chatId, tracker, executor, '✅ Done. No file changes were needed.');
 }
 
 export async function runPlanSteps(
-  ctx: { reply: (t: string, o?: object) => Promise<unknown> },
+  ctx: any,
   chatId: number,
   plan: Plan,
   steps: PlanStep[],
@@ -106,16 +140,18 @@ export async function runPlanSteps(
   const executor = new ToolExecutor(tracker, config);
   const tools = { ...createAgentTools(executor), ...extraWebTools(tracker) };
 
-  for (const step of steps) {
-    await ctx.reply(`🔧 Executing: *${step.title}*`, { parse_mode: 'Markdown' });
-    const prompt = [`Goal: ${plan.goal}`, `Step: ${step.title}`, step.description].join('\n');
-    const agent = new ToolLoopAgent({
-      ...agentOptions(config, 30),
-      tools,
-    });
-    const { text } = await agent.generate({ prompt });
-    if (text?.trim()) await replyMd(ctx, text.trim());
-  }
+  await withTelegramSpinner(ctx, "Executing plan", async () => {
+    for (const step of steps) {
+      await ctx.reply(`🔧 Executing: *${step.title}*`, { parse_mode: 'Markdown' });
+      const prompt = [`Goal: ${plan.goal}`, `Step: ${step.title}`, step.description].join('\n');
+      const agent = new ToolLoopAgent({
+        ...agentOptions(config, 30),
+        tools,
+      });
+      const { text } = await agent.generate({ prompt });
+      if (text?.trim()) await replyMd(ctx, text.trim());
+    }
+  });
 
- await finishOrApprove(ctx, chatId, tracker, executor, '✅ All steps done. No file changes needed.');
+  await finishOrApprove(ctx, chatId, tracker, executor, '✅ All steps done. No file changes needed.');
 }

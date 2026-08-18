@@ -5,7 +5,7 @@ import { clip, commandArg } from "./text";
 import { runAgent, runAsk, runPlanSteps } from "./agent-run";
 import { generatePlan } from "../plan/planner";
 import { planKeyboard, planMessage, planSessions, refreshPlanUi, type PlanSession } from "./plan-session";
-import { approvalDiff, approvalSessions } from "./approval-session";
+import { approvalDiff, approvalSessions, clearApprovalSession } from "./approval-session";
 
 export function registerHandlers(bot: Telegraf) {
   bot.command("start", async (ctx) => {
@@ -104,6 +104,31 @@ export function registerHandlers(bot: Telegraf) {
     void runPlanSteps(ctx, ctx.chat!.id, plan, steps).catch(console.error);
   });
 
+  bot.command("cancel", async (ctx) => {
+    if (!isOwner(ctx.chat.id)) return;
+    let canceled = false;
+    const s = approvalSessions.get(ctx.chat.id);
+    if (s) {
+      clearApprovalSession(ctx.chat.id);
+      for (const a of s.pending) s.tracker.updateStatus(a.id, 'rejected', false);
+      s.executor.clearStaging();
+      if (s.messageId) {
+        await ctx.telegram.editMessageText(ctx.chat.id, s.messageId, undefined, '❌ Session explicitly canceled.').catch(() => {});
+      }
+      canceled = true;
+    }
+    const ps = planSessions.get(ctx.chat.id);
+    if (ps) {
+      planSessions.delete(ctx.chat.id);
+      canceled = true;
+    }
+    if (canceled) {
+      await ctx.reply("✅ Active session canceled.");
+    } else {
+      await ctx.reply("No active session to cancel.");
+    }
+  });
+
   bot.action('approval_diff', async (ctx) => {
     if (!isOwner(ctx.chat!.id)) return ctx.answerCbQuery();
     const s = approvalSessions.get(ctx.chat!.id);
@@ -120,12 +145,13 @@ export function registerHandlers(bot: Telegraf) {
     for (const a of s.pending) s.tracker.updateStatus(a.id, 'approved', true);
     const { errors, appliedCount } = s.executor.applyApprovedFromTracker();
 
+    clearApprovalSession(ctx.chat!.id);
+    
     if (errors.length) {
       await ctx.editMessageText(`⚠️ Applied ${appliedCount} change(s). Some failed:\n\n${errors.map(e => `• ${e}`).join('\n')}`);
       await ctx.answerCbQuery('Failed!');
       console.error(errors);
     } else {
-      approvalSessions.delete(ctx.chat!.id);
       s.executor.clearStaging();
       await ctx.editMessageText('✅ All changes applied.');
       await ctx.answerCbQuery('Applied!');
@@ -137,7 +163,7 @@ export function registerHandlers(bot: Telegraf) {
     const s = approvalSessions.get(ctx.chat!.id);
     if (!s) return ctx.answerCbQuery();
 
-    approvalSessions.delete(ctx.chat!.id);
+    clearApprovalSession(ctx.chat!.id);
     for (const a of s.pending) s.tracker.updateStatus(a.id, 'rejected', false);
     s.executor.clearStaging();
 

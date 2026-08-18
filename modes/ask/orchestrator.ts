@@ -2,13 +2,24 @@ import chalk from "chalk";
 import { confirm, isCancel, text } from "@clack/prompts";
 import { ToolLoopAgent, stepCountIs, tool } from "ai";
 import { z } from "zod";
-import { getAgentModel } from "../../ai/ai.config.ts";
+import { getAgentModel, SHARED_SYSTEM_PROMPT } from "../../ai/index.ts";
 import { ActionTracker } from "../agent/action.tracker.ts";
 import { ToolExecutor } from "../agent/tool.executor.ts";
 import { defaultAgentConfig } from "../agent/types.ts";
 import { renderTerminalMarkdown } from "../../tui/terminal-md.ts";
 import { runApprovalFlow } from "../agent/approval.ts";
 import { createWebTools } from "../plan/web-tools.ts";
+
+import { globalSpinner } from "../../tui/spinner.ts";
+
+async function withSpinner<T>(label: string, fn: () => T | Promise<T>): Promise<T> {
+  globalSpinner.update(label);
+  try {
+    return await fn();
+  } finally {
+    globalSpinner.update("Thinking…");
+  }
+}
 
 function createAskTools(executor: ToolExecutor) {
   return {
@@ -18,7 +29,7 @@ function createAskTools(executor: ToolExecutor) {
       inputSchema: z.object({
         path: z.string().describe("Relative file path"),
       }),
-      execute: async ({ path: p }) => executor.readFile(p),
+      execute: async ({ path: p }) => withSpinner("Reading file…", () => executor.readFile(p)),
     }),
 
     list_files: tool({
@@ -28,7 +39,7 @@ function createAskTools(executor: ToolExecutor) {
         recursive: z.boolean().optional().default(false),
       }),
       execute: async ({ path: p, recursive }) =>
-        executor.listFiles(p, recursive),
+        withSpinner("Listing files…", () => executor.listFiles(p, recursive)),
     }),
 
     search_files: tool({
@@ -42,7 +53,7 @@ function createAskTools(executor: ToolExecutor) {
         content_contains: z.string().optional(),
       }),
       execute: async ({ root, pattern, content_contains }) =>
-        executor.searchFiles(root, pattern, content_contains),
+        withSpinner("Searching…", () => executor.searchFiles(root, pattern, content_contains)),
     }),
 
     analyze_codebase: tool({
@@ -51,14 +62,14 @@ function createAskTools(executor: ToolExecutor) {
       inputSchema: z.object({
         path: z.string().default("."),
       }),
-      execute: async ({ path: p }) => executor.analyzeCodebase(p),
+      execute: async ({ path: p }) => withSpinner("Analyzing codebase…", () => executor.analyzeCodebase(p)),
     }),
 
     list_skills: tool({
       description:
         "List absolute paths to SKILL.md files under configured skill directories (Cursor / Claude).",
       inputSchema: z.object({}),
-      execute: async () => executor.listSkills(),
+      execute: async () => withSpinner("Listing skills…", () => executor.listSkills()),
     }),
 
     read_skill: tool({
@@ -67,7 +78,7 @@ function createAskTools(executor: ToolExecutor) {
       inputSchema: z.object({
         path: z.string(),
       }),
-      execute: async ({ path: p }) => executor.readSkill(p),
+      execute: async ({ path: p }) => withSpinner("Reading skill…", () => executor.readSkill(p)),
     }),
   };
 }
@@ -100,10 +111,32 @@ export async function runAskMode() {
   const agent = new ToolLoopAgent({
     model: getAgentModel(),
     stopWhen: stepCountIs(20),
+    instructions: SHARED_SYSTEM_PROMPT,
     tools,
   });
 
-  const result = await agent.generate({ prompt: question.trim() });
+  globalSpinner.start("Thinking…");
+  let result;
+  try {
+    result = await agent.generate({
+      prompt: question.trim(),
+      onStepFinish: ({ toolCalls }) => {
+        globalSpinner.stop();
+        for (const tc of toolCalls) {
+          const preview = JSON.stringify(tc.input).slice(0, 160);
+          console.log(
+            chalk.green("  ✓"),
+            chalk.bold(String(tc.toolName)),
+            chalk.dim(preview + (preview.length >= 160 ? "..." : "")),
+          );
+        }
+        globalSpinner.start("Thinking…");
+      },
+    });
+  } finally {
+    globalSpinner.stop();
+  }
+  
   const answer = result.text?.trim() || "(no answer)";
   console.log("\n" + renderTerminalMarkdown(answer) + "\n");
 

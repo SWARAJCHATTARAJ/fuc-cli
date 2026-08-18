@@ -1,6 +1,16 @@
 import { tool } from "ai";
 import { z } from "zod";
 import type { ToolExecutor } from "./tool.executor";
+import { globalSpinner } from "../../tui/spinner";
+
+async function withSpinner<T>(label: string, fn: () => T | Promise<T>): Promise<T> {
+  globalSpinner.update(label);
+  try {
+    return await fn();
+  } finally {
+    globalSpinner.update("Thinking…");
+  }
+}
 
 export function createAgentTools(executor: ToolExecutor) {
   return {
@@ -10,7 +20,7 @@ export function createAgentTools(executor: ToolExecutor) {
       inputSchema: z.object({
         path: z.string().describe("Relative file path"),
       }),
-      execute: async ({ path: p }) => executor.readFile(p),
+      execute: async ({ path: p }) => withSpinner("Reading file…", () => executor.readFile(p)),
     }),
 
     create_file: tool({
@@ -20,7 +30,7 @@ export function createAgentTools(executor: ToolExecutor) {
         path: z.string(),
         content: z.string(),
       }),
-      execute: async ({ path: p, content }) => executor.createFile(p, content),
+      execute: async ({ path: p, content }) => withSpinner("Staging file…", () => executor.createFile(p, content)),
     }),
 
     modify_file: tool({
@@ -30,7 +40,7 @@ export function createAgentTools(executor: ToolExecutor) {
         path: z.string(),
         content: z.string().describe("Complete new file contents"),
       }),
-      execute: async ({ path: p, content }) => executor.modifyFile(p, content),
+      execute: async ({ path: p, content }) => withSpinner("Editing file…", () => executor.modifyFile(p, content)),
     }),
 
     delete_file: tool({
@@ -38,7 +48,7 @@ export function createAgentTools(executor: ToolExecutor) {
       inputSchema: z.object({
         path: z.string(),
       }),
-      execute: async ({ path: p }) => executor.deleteFile(p),
+      execute: async ({ path: p }) => withSpinner("Staging deletion…", () => executor.deleteFile(p)),
     }),
 
     create_folder: tool({
@@ -47,7 +57,7 @@ export function createAgentTools(executor: ToolExecutor) {
       inputSchema: z.object({
         path: z.string().describe("Relative directory path"),
       }),
-      execute: async ({ path: p }) => executor.createFolder(p),
+      execute: async ({ path: p }) => withSpinner("Staging folder…", () => executor.createFolder(p)),
     }),
 
     list_files: tool({
@@ -57,7 +67,7 @@ export function createAgentTools(executor: ToolExecutor) {
         recursive: z.boolean().optional().default(false),
       }),
       execute: async ({ path: p, recursive }) =>
-        executor.listFiles(p, recursive),
+        withSpinner("Listing files…", () => executor.listFiles(p, recursive)),
     }),
 
     search_files: tool({
@@ -71,7 +81,7 @@ export function createAgentTools(executor: ToolExecutor) {
         content_contains: z.string().optional(),
       }),
       execute: async ({ root, pattern, content_contains }) =>
-        executor.searchFiles(root, pattern, content_contains),
+        withSpinner("Searching…", () => executor.searchFiles(root, pattern, content_contains)),
     }),
 
     analyze_codebase: tool({
@@ -80,7 +90,7 @@ export function createAgentTools(executor: ToolExecutor) {
       inputSchema: z.object({
         path: z.string().default("."),
       }),
-      execute: async ({ path: p }) => executor.analyzeCodebase(p),
+      execute: async ({ path: p }) => withSpinner("Analyzing codebase…", () => executor.analyzeCodebase(p)),
     }),
 
     execute_shell: tool({
@@ -89,14 +99,14 @@ export function createAgentTools(executor: ToolExecutor) {
       inputSchema: z.object({
         command: z.string().describe("Single command; runs with shell: true"),
       }),
-      execute: async ({ command }) => executor.queueShell(command),
+      execute: async ({ command }) => withSpinner("Running command…", () => executor.queueShell(command)),
     }),
 
     list_skills: tool({
       description:
         "List absolute paths to SKILL.md files under configured skill directories (Cursor / Claude).",
       inputSchema: z.object({}),
-      execute: async () => executor.listSkills(),
+      execute: async () => withSpinner("Listing skills…", () => executor.listSkills()),
     }),
 
     read_skill: tool({
@@ -105,7 +115,7 @@ export function createAgentTools(executor: ToolExecutor) {
       inputSchema: z.object({
         path: z.string(),
       }),
-      execute: async ({ path: p }) => executor.readSkill(p),
+      execute: async ({ path: p }) => withSpinner("Reading skill…", () => executor.readSkill(p)),
     }),
   };
 }

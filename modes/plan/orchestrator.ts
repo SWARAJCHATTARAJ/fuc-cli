@@ -8,6 +8,7 @@ import { createAgentTools } from "../agent/agent-tool.ts";
 import { defaultAgentConfig } from "../agent/types.ts";
 import { runApprovalFlow } from "../agent/approval.ts";
 import { renderTerminalMarkdown } from "../../tui/terminal-md.ts";
+import { globalSpinner } from "../../tui/spinner.ts";
 import { generatePlan } from "./planner.ts";
 import { printPlan, selectSteps } from "./selection.ts";
 import type { PlanStep } from "./types.ts";
@@ -57,9 +58,30 @@ export async function runPlanMode(): Promise<void> {
       tools
     });
 
-    const r = await agent.generate({prompt:stepPrompt(plan.goal , step)})
+    globalSpinner.start("Thinking…");
+    const r = await agent.stream({
+      prompt: stepPrompt(plan.goal, step),
+      onStepFinish: ({ toolCalls }) => {
+        globalSpinner.stop();
+        for (const tc of toolCalls) {
+          const preview = JSON.stringify(tc.input).slice(0, 160);
+          console.log(
+            chalk.green("  ✓"),
+            chalk.bold(String(tc.toolName)),
+            chalk.dim(preview + (preview.length >= 160 ? "..." : "")),
+          );
+        }
+        globalSpinner.start("Thinking…");
+      },
+    });
+    globalSpinner.stop();
 
-    if(r.text) console.log(renderTerminalMarkdown(r.text));
+    let fullText = "";
+    for await (const chunk of r.textStream) {
+      process.stdout.write(chunk);
+      fullText += chunk;
+    }
+    if (fullText.trim()) console.log("\n");
 
   }
 

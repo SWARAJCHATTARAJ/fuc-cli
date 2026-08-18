@@ -1,14 +1,16 @@
 # fuc-cli
 
-A local coding-agent CLI with a Telegram interface. It reads your workspace, talks to an OpenRouter model, and can stage file and shell changes for you to review before anything touches disk.
+A local coding agent with a Telegram interface. It reads your workspace, works with an OpenRouter model, and stages file and shell changes for you to review before anything gets applied.
 
-Built on Bun and TypeScript, using the Vercel AI SDK for the agent loop and Telegraf for the Telegram side.
+Built on Bun and TypeScript, using the Vercel AI SDK for the agent loop and Telegraf for Telegram.
 
 ## What it does
 
 - **Terminal launcher** with Ask, Plan, and Agent modes.
 - **Telegram bot** that mirrors the same workflows from your phone.
-- **Human approval gate** before any file, folder, or shell mutation is applied. Nothing gets written to disk without you looking at it first.
+- **Human approval gate** before any file, folder, or shell mutation is applied.
+- **Live status while it works** — a terminal spinner with elapsed time and streamed token output in the terminal, and a Telegram typing indicator with a periodically updated status message, so you're not staring at a blank screen during a model call or tool run.
+- **Telegram sessions expire on their own** after 15 minutes of inactivity, and can be cancelled explicitly with `/cancel`.
 - **Optional web research** through Firecrawl, when configured.
 
 ## How a request flows
@@ -56,12 +58,14 @@ Copy `.env.example` to `.env` and fill in what you need:
 | Variable | Required for | Notes |
 |---|---|---|
 | `OPENROUTER_API_KEY` | everything model-backed | required for Ask, Plan, and Agent |
-| `OPENROUTER_DEFAULT_MODEL` | — | optional; supports `openrouter/free` or any `:free` model ID |
+| `OPENROUTER_DEFAULT_MODEL` | — | optional; code permits `openrouter/free` or any model ID ending in `:free` |
 | `FIRECRAWL_API_KEY` | web research | only needed if you want the agent to search or crawl the web |
 | `TELEGRAM_BOT_TOKEN` | Telegram mode | from BotFather |
 | `TELEGRAM_OWNER_ID` | Telegram mode | the only chat ID allowed to use the bot |
 | `SKILLS_DIRS` | — | optional, semicolon-delimited paths to skill directories |
 | `FUC_ALLOW_SHELL` | shell execution | off by default; set to `1` to let the agent stage shell commands at all |
+| `FUC_MAX_DEPTH` | — | optional; max directory traversal depth during search/list/analyze, default 10 |
+| `FUC_MAX_FILES` | — | optional; max files processed during traversal, default 5000 |
 
 Never commit your real `.env`. Only `.env.example` with placeholder values belongs in the repo.
 
@@ -79,24 +83,21 @@ The agent can read your workspace freely. It cannot write, delete, or run shell 
 
 - File and folder changes are staged first. You see a diff before anything is written.
 - Shell commands are disabled by default, on top of the approval gate. You have to opt in with `FUC_ALLOW_SHELL=1`, and even then, each command needs its own separate confirmation, shown in full, not folded into a general "approve all" for file changes.
-- All file operations are restricted to the configured workspace directory, including through symlinks. The agent can't read or write outside it by following a symlink out.
-
-Telegram approval currently reports what actually happened, success or failure per action, rather than assuming everything went through.
+- All file operations, including reads from configured skill directories, are restricted to the configured workspace directory using real path resolution, not string matching, so symlinks pointing outside the workspace are rejected. Depth and file-count limits during traversal are configurable via `FUC_MAX_DEPTH` (default 10) and `FUC_MAX_FILES` (default 5000).
 
 ## Known limitations
 
-This is an early-stage project. Some things worth knowing before you rely on it:
+This is an early-stage project under active work. Current state, honestly:
 
-- Web tools require a valid Firecrawl key. Without one, web-related requests should fail with a clear error rather than crash, but always double check the model isn't fabricating results if you haven't set one up.
-- Filesystem search and listing are not yet bounded by size or depth, so pointing the agent at a very large workspace may be slow.
-- Telegram sessions live in memory and don't expire on their own. Restarting the bot process clears them.
-- There's no test suite yet. Verify anything unfamiliar in the source before trusting it in a workspace you care about.
+- **There's no automated test suite yet wired into `bun test`.** Individual bugs have been verified with one-off scripts during development, but there's no standing regression suite. Read the source for anything you're about to rely on, and consider this a priority before depending on this in a workflow that matters.
+- **Terminal and Telegram run separate agent implementations.** Telegram doesn't share `modes/agent/orchestrator.ts` with the terminal, it spins up its own `ToolLoopAgent` instance in `modes/telegram/agent-run.ts`. Both are currently correct, but a fix applied to one path isn't guaranteed to apply to the other. Keep this in mind if you're patching agent behavior, check both paths.
+- **Web fetch and Firecrawl results are not yet treated as untrusted content.** There's no SSRF protection (blocking private/internal addresses), response size limiting, or an explicit instruction telling the model not to treat scraped page content as commands. Be cautious with web research enabled against content you don't control.
 
 ## Project layout
 
 ```
 index.ts                Commander entry point: fuc-code fah
-tui/                     terminal launcher and rendering
+tui/                     terminal launcher, rendering, and spinner
 ai/                       OpenRouter model configuration
 modes/cli.ts             terminal sub-mode menu
 modes/agent/             agent tools, staging, approval, diff view

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { homedir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -52,11 +53,13 @@ export class ToolExecutor {
         if (relCheck.startsWith("..") || path.isAbsolute(relCheck)) {
           throw new Error(`Path escapes workspace: ${rel}`);
         }
+        break;
       }
       const parent = path.dirname(current);
       if (parent === current) break;
       current = parent;
     }
+
 
     const relCheck = path.relative(root, abs);
     if (relCheck.startsWith("..") || path.isAbsolute(relCheck)) {
@@ -95,17 +98,29 @@ export class ToolExecutor {
     return fs.readFileSync(abs, "utf8");
   }
 
-  readFile(rel: string): string {
+  async readFile(rel: string): Promise<string> {
     this.assertNotExcluded(rel, "read_file");
     const abs = this.resolveSafe(rel);
     if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
       throw new Error(`File not found: ${rel}`);
     }
-    const st = fs.statSync(abs);
+    const st = await fsPromises.stat(abs);
     if (st.size > this.config.maxFileSizeToRead) {
       throw new Error(`File too large: ${rel}`);
     }
-    const text = fs.readFileSync(abs, "utf8");
+
+    const fd = await fsPromises.open(abs, "r");
+    try {
+      const buffer = Buffer.alloc(4096);
+      const { bytesRead } = await fd.read(buffer, 0, 4096, 0);
+      if (buffer.subarray(0, bytesRead).includes(0)) {
+        throw new Error(`Cannot read binary file: ${rel}`);
+      }
+    } finally {
+      await fd.close();
+    }
+
+    const text = await fsPromises.readFile(abs, "utf8");
     this.tracker.log({
       type: "code_analysis",
       path: this.norm(rel),
@@ -186,28 +201,37 @@ export class ToolExecutor {
     return `Staged folder: ${key}`;
   }
 
-  listFiles(rel: string, recursive: boolean): string {
+  async listFiles(rel: string, recursive: boolean): Promise<string> {
     this.assertNotExcluded(rel, "list_files");
     const abs = this.resolveSafe(rel);
     if (!fs.existsSync(abs)) throw new Error(`list_files: not found: ${rel}`);
 
     const lines: string[] = [];
-    const walk = (dir: string, prefix: string) => {
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
+    let fileCount = 0;
+
+    const walk = async (dir: string, prefix: string, depth: number) => {
+      if (depth > this.config.maxDirectoryDepth) return;
+      if (fileCount > this.config.maxFilesToProcess) return;
+
+      const entries = await fsPromises.readdir(dir, { withFileTypes: true });
       for (const ent of entries) {
+        if (fileCount > this.config.maxFilesToProcess) break;
         const full = path.join(dir, ent.name);
         const relP = path.relative(this.config.codebasePath, full);
         if (this.excluded(relP)) continue;
+        
+        fileCount++;
         if (ent.isDirectory()) {
           lines.push(`${prefix}${ent.name}/`);
-          if (recursive) walk(full, `${prefix}${ent.name}/`);
+          if (recursive) await walk(full, `${prefix}${ent.name}/`, depth + 1);
         } else {
           lines.push(`${prefix}${ent.name}`);
         }
       }
     };
 
-    if (fs.statSync(abs).isDirectory()) walk(abs, "");
+    const st = await fsPromises.stat(abs);
+    if (st.isDirectory()) await walk(abs, "", 1);
     else lines.push(path.relative(this.config.codebasePath, abs));
 
     const out = lines.sort().join("\n");
@@ -220,11 +244,11 @@ export class ToolExecutor {
     return out || "(empty)";
   }
 
-  searchFiles(
+  async searchFiles(
     rootRel: string,
     globPattern: string,
     contentQuery?: string,
-  ): string {
+  ): Promise<string> {
     this.assertNotExcluded(rootRel, "search_files");
     const rootAbs = this.resolveSafe(rootRel);
     if (!fs.existsSync(rootAbs))
@@ -242,27 +266,55 @@ export class ToolExecutor {
     };
     const nameRe = regexFromGlob(globPattern.replace(/\\/g, "/"));
 
-    const walk = (dir: string) => {
-      for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+    let fileCount = 0;
+    const walk = async (dir: string, depth: number) => {
+      if (depth > this.config.maxDirectoryDepth) return;
+      if (fileCount > this.config.maxFilesToProcess) return;
+
+      const entries = await fsPromises.readdir(dir, { withFileTypes: true });
+      for (const ent of entries) {
+        if (fileCount > this.config.maxFilesToProcess) break;
         const full = path.join(dir, ent.name);
         const relP = path
           .relative(this.config.codebasePath, full)
           .split(path.sep)
           .join("/");
         if (this.excluded(relP)) continue;
-        if (ent.isDirectory()) walk(full);
-        else if (nameRe.test(relP) || nameRe.test(ent.name)) {
+        
+        fileCount++;
+        if (ent.isDirectory()) {
+          await walk(full, depth + 1);
+        } else if (nameRe.test(relP) || nameRe.test(ent.name)) {
           if (contentQuery) {
             if (!isProbablyTextFile(full)) continue;
-            const text = fs.readFileSync(full, "utf8");
-            if (!text.includes(contentQuery)) continue;
+            try {
+              const st = await fsPromises.stat(full);
+              if (!st.isFile()) continue;
+              
+              const fd = await fsPromises.open(full, "r");
+              let isBinary = false;
+              try {
+                const buffer = Buffer.alloc(4096);
+                const { bytesRead } = await fd.read(buffer, 0, 4096, 0);
+                if (buffer.subarray(0, bytesRead).includes(0)) isBinary = true;
+              } finally {
+                await fd.close();
+              }
+              if (isBinary) continue;
+              
+              if (st.size <= this.config.maxFileSizeToRead) {
+                const text = await fsPromises.readFile(full, "utf8");
+                if (!text.includes(contentQuery)) continue;
+              } else continue;
+            } catch (e) { continue; }
           }
           results.push(relP);
         }
       }
     };
 
-    if (fs.statSync(rootAbs).isDirectory()) walk(rootAbs);
+    const st = await fsPromises.stat(rootAbs);
+    if (st.isDirectory()) await walk(rootAbs, 1);
     else {
       const relP = path
         .relative(this.config.codebasePath, rootAbs)
@@ -281,27 +333,38 @@ export class ToolExecutor {
     return out || "(no matches)";
   }
 
-  analyzeCodebase(rootRel: string): string {
+  async analyzeCodebase(rootRel: string): Promise<string> {
     const rootAbs = this.resolveSafe(rootRel);
     if (!fs.existsSync(rootAbs))
       throw new Error(`analyze_codebase: not found: ${rootRel}`);
 
     let files = 0;
     let dirs = 0;
-    const walk = (dir: string) => {
-      for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+    let fileCount = 0;
+
+    const walk = async (dir: string, depth: number) => {
+      if (depth > this.config.maxDirectoryDepth) return;
+      if (fileCount > this.config.maxFilesToProcess) return;
+
+      const entries = await fsPromises.readdir(dir, { withFileTypes: true });
+      for (const ent of entries) {
+        if (fileCount > this.config.maxFilesToProcess) break;
         const full = path.join(dir, ent.name);
         const relP = path.relative(this.config.codebasePath, full);
         if (this.excluded(relP)) continue;
+        
+        fileCount++;
         if (ent.isDirectory()) {
           dirs++;
-          walk(full);
+          await walk(full, depth + 1);
         } else {
           files++;
         }
       }
     };
-    if (fs.statSync(rootAbs).isDirectory()) walk(rootAbs);
+    
+    const st = await fsPromises.stat(rootAbs);
+    if (st.isDirectory()) await walk(rootAbs, 1);
     else files = 1;
 
     const summary = `Files: ${files} | Directories: ${dirs}`;
@@ -360,16 +423,22 @@ export class ToolExecutor {
     return out || "(none)";
   }
 
-  readSkill(skillPath: string): string {
-    const abs = path.isAbsolute(skillPath)
+  async readSkill(skillPath: string): Promise<string> {
+    const rawAbs = path.isAbsolute(skillPath)
       ? path.normalize(skillPath)
       : path.normalize(path.resolve(this.config.codebasePath, skillPath));
+
+    if (!fs.existsSync(rawAbs)) throw new Error(`read_skill: not found: ${skillPath}`);
+    const abs = fs.realpathSync(rawAbs);
+
     const allowed = this.skillRoots().some((root) => {
-      const r = path.resolve(root);
+      if (!fs.existsSync(root)) return false;
+      const r = fs.realpathSync(root);
       return abs === r || abs.startsWith(r + path.sep);
     });
+    
     if (!allowed) throw new Error("read_skill: outside skill roots");
-    const text = fs.readFileSync(abs, "utf8");
+    const text = await fsPromises.readFile(abs, "utf8");
     this.tracker.log({
       type: "code_analysis",
       path: abs,

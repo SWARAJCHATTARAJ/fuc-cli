@@ -1,14 +1,14 @@
 import {
   Output,
   extractJsonMiddleware,
-  generateText,
+  streamText,
   stepCountIs,
   tool,
   wrapLanguageModel,
 } from "ai";
 import { z } from "zod";
 import chalk from "chalk";
-import { getAgentModel } from "../../ai/ai.config.ts";
+import { getAgentModel, SHARED_SYSTEM_PROMPT } from "../../ai/index.ts";
 import { ActionTracker } from "../agent/action.tracker.ts";
 import { ToolExecutor } from "../agent/tool.executor.ts";
 import { defaultAgentConfig } from "../agent/types.ts";
@@ -30,6 +30,17 @@ const planSchema = z.object({
     .max(15),
 });
 
+import { globalSpinner } from "../../tui/spinner.ts";
+
+async function withSpinner<T>(label: string, fn: () => T | Promise<T>): Promise<T> {
+  globalSpinner.update(label);
+  try {
+    return await fn();
+  } finally {
+    globalSpinner.update("Thinking…");
+  }
+}
+
 function readOnlyTools(executor: ToolExecutor) {
   return {
     read_file: tool({
@@ -38,7 +49,7 @@ function readOnlyTools(executor: ToolExecutor) {
       inputSchema: z.object({
         path: z.string().describe("Relative file path"),
       }),
-      execute: async ({ path: p }) => executor.readFile(p),
+      execute: async ({ path: p }) => withSpinner("Reading file…", () => executor.readFile(p)),
     }),
 
     list_files: tool({
@@ -48,7 +59,7 @@ function readOnlyTools(executor: ToolExecutor) {
         recursive: z.boolean().optional().default(false),
       }),
       execute: async ({ path: p, recursive }) =>
-        executor.listFiles(p, recursive),
+        withSpinner("Listing files…", () => executor.listFiles(p, recursive)),
     }),
 
     search_files: tool({
@@ -62,7 +73,7 @@ function readOnlyTools(executor: ToolExecutor) {
         content_contains: z.string().optional(),
       }),
       execute: async ({ root, pattern, content_contains }) =>
-        executor.searchFiles(root, pattern, content_contains),
+        withSpinner("Searching…", () => executor.searchFiles(root, pattern, content_contains)),
     }),
 
     analyze_codebase: tool({
@@ -71,14 +82,14 @@ function readOnlyTools(executor: ToolExecutor) {
       inputSchema: z.object({
         path: z.string().default("."),
       }),
-      execute: async ({ path: p }) => executor.analyzeCodebase(p),
+      execute: async ({ path: p }) => withSpinner("Analyzing codebase…", () => executor.analyzeCodebase(p)),
     }),
 
     list_skills: tool({
       description:
         "List absolute paths to SKILL.md files under configured skill directories (Cursor / Claude).",
       inputSchema: z.object({}),
-      execute: async () => executor.listSkills(),
+      execute: async () => withSpinner("Listing skills…", () => executor.listSkills()),
     }),
 
     read_skill: tool({
@@ -87,7 +98,7 @@ function readOnlyTools(executor: ToolExecutor) {
       inputSchema: z.object({
         path: z.string(),
       }),
-      execute: async ({ path: p }) => executor.readSkill(p),
+      execute: async ({ path: p }) => withSpinner("Reading skill…", () => executor.readSkill(p)),
     }),
   };
 }
@@ -102,7 +113,9 @@ const PLAN_INSTRUCTIONS = (codebase: string, hasWeb: boolean) =>
       : "Web tools are unavailable (no FIRECRAWL_API_KEY).",
     "Output must match the provided JSON schema.",
     "Keep it short: 1–15 steps.",
+    SHARED_SYSTEM_PROMPT,
   ].join("\n");
+
 
 export async function generatePlan(goal: string) {
   const config = defaultAgentConfig();
@@ -119,18 +132,31 @@ export async function generatePlan(goal: string) {
 
   const tools = { ...readOnlyTools(executor) , ...(hasWeb ? createWebTools(tracker) : {}) };
 
-  console.log(chalk.cyan("\n🔍 Researching & drafting a plan…\n"));
+  console.log(chalk.bold("\n🔍 Plan Mode\n"));
+  globalSpinner.start("Researching & drafting a plan…");
 
-  const result = await generateText({
-    model,
-    tools,
-    stopWhen:stepCountIs(20),
-    system:PLAN_INSTRUCTIONS(config.codebasePath , hasWeb),
-    prompt:`User goal: \n${goal}`,
-    output:Output.object({schema:planSchema})
-  });
+  let result;
+  try {
+    result = await streamText({
+      model,
+      tools,
+      stopWhen:stepCountIs(20),
+      system:PLAN_INSTRUCTIONS(config.codebasePath , hasWeb),
+      prompt:`User goal: \n${goal}`,
+      output:Output.object({schema:planSchema})
+    });
 
-  const validated = planSchema.parse(result.output);
+    globalSpinner.stop();
+    for await (const chunk of result.textStream) {
+      process.stdout.write(chalk.gray(chunk));
+    }
+    console.log("\n");
+  } finally {
+    globalSpinner.stop();
+  }
+
+  const rawOutput = await result.output;
+  const validated = planSchema.parse(rawOutput);
 
   const steps:PlanStep[] = validated.steps.map((s , i)=>({
     id:`step-${i+1}`,

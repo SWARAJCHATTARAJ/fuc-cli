@@ -9,9 +9,19 @@ export interface ApprovalSession {
   tracker: ActionTracker;
   executor: ToolExecutor;
   pending: ActionLog[];
+  messageId?: number;
+  timeout?: ReturnType<typeof setTimeout>;
 }
 
 export const approvalSessions = new Map<number, ApprovalSession>();
+
+export function clearApprovalSession(chatId: number) {
+  const s = approvalSessions.get(chatId);
+  if (s) {
+    if (s.timeout) clearTimeout(s.timeout);
+    approvalSessions.delete(chatId);
+  }
+}
 
 function groupPending(pending: ActionLog[]) {
   const files = new Map<string, ActionLog[]>();
@@ -49,12 +59,12 @@ export function approvalDiff(pending: ActionLog[]): string {
 }
 
 async function promptApproval(
-  ctx: { reply: (t: string, o?: object) => Promise<unknown> },
+  ctx: any,
   chatId: number,
   session: ApprovalSession,
 ) {
-  approvalSessions.set(chatId, session);
-  await ctx.reply(approvalSummary(session.pending), {
+  clearApprovalSession(chatId);
+  const msg = await ctx.reply(approvalSummary(session.pending), {
     ...Markup.inlineKeyboard([
       [Markup.button.callback('📋 Show Diff', 'approval_diff')],
       [
@@ -63,10 +73,22 @@ async function promptApproval(
       ],
     ]),
   });
+
+  session.messageId = msg.message_id;
+  session.timeout = setTimeout(() => {
+    clearApprovalSession(chatId);
+    for (const a of session.pending) session.tracker.updateStatus(a.id, 'rejected', false);
+    session.executor.clearStaging();
+    if (ctx.telegram && session.messageId) {
+      ctx.telegram.editMessageText(chatId, session.messageId, undefined, '❌ Session expired due to inactivity. Nothing was applied.').catch(() => {});
+    }
+  }, 15 * 60 * 1000);
+
+  approvalSessions.set(chatId, session);
 }
 
 export async function finishOrApprove(
-  ctx: { reply: (t: string, o?: object) => Promise<unknown> },
+  ctx: any,
   chatId: number,
   tracker: ActionTracker,
   executor: ToolExecutor,
