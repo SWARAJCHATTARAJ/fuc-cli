@@ -1,6 +1,7 @@
-import {select , isCancel} from "@clack/prompts";
+import {select , isCancel, confirm} from "@clack/prompts";
 import chalk from "chalk"
 import figlet from "figlet";
+import { resolve } from "path";
 import { runCliMode } from "../modes/cli";
 import { runTelegramMode } from "../modes/telegram";
 
@@ -35,6 +36,19 @@ export async function runWakeup() {
     }
 
     printBannerWithShadow(ascii)
+
+    const workspacePath = resolve(process.cwd());
+    console.log(`\nWorkspace: ${workspacePath}\n`);
+
+    const useWorkspace = await confirm({
+        message: "Use this folder as the workspace?",
+        initialValue: true
+    });
+
+    if (isCancel(useWorkspace) || !useWorkspace) {
+        console.log(chalk.dim('\n Goodbye. \n'));
+        process.exit(0);
+    }
 
     const mode = await select({
         message:"Which mode you want to proceed with?",

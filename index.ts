@@ -6,7 +6,7 @@ import { join } from "path";
 import { runWakeup } from "./tui/fah.ts";
 import { runDoctor } from "./diagnostics/doctor.ts";
 
-const envPath = join(import.meta.dir, ".env");
+const envPath = join((import.meta as any).dir, ".env");
 if (existsSync(envPath)) {
   const content = readFileSync(envPath, "utf-8");
   for (const line of content.split("\n")) {
@@ -14,7 +14,7 @@ if (existsSync(envPath)) {
     if (match) {
       const key = match[1];
       const value = match[2] || "";
-      if (!process.env[key]) {
+      if (key && !process.env[key]) {
         process.env[key] = value.trim();
       }
     }
