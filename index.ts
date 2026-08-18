@@ -1,8 +1,25 @@
 #!/usr/bin/env bun
 
 import {Command} from "commander";
-import { runWakeup } from "./tui/fah";
-import { runDoctor } from "./diagnostics/doctor";
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
+import { runWakeup } from "./tui/fah.ts";
+import { runDoctor } from "./diagnostics/doctor.ts";
+
+const envPath = join(import.meta.dir, ".env");
+if (existsSync(envPath)) {
+  const content = readFileSync(envPath, "utf-8");
+  for (const line of content.split("\n")) {
+    const match = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/);
+    if (match) {
+      const key = match[1];
+      const value = match[2] || "";
+      if (!process.env[key]) {
+        process.env[key] = value.trim();
+      }
+    }
+  }
+}
 
 const program = new Command();
 
