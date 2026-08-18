@@ -9,6 +9,7 @@ import {
 import { z } from "zod";
 import chalk from "chalk";
 import { getAgentModel, SHARED_SYSTEM_PROMPT } from "../../ai/index.ts";
+import { getAIProvider } from "../../ai/ai.config.ts";
 import { ActionTracker } from "../agent/action.tracker.ts";
 import { ToolExecutor } from "../agent/tool.executor.ts";
 import { defaultAgentConfig } from "../agent/types.ts";
@@ -103,7 +104,11 @@ function readOnlyTools(executor: ToolExecutor) {
   };
 }
 
-const PLAN_INSTRUCTIONS = (codebase: string, hasWeb: boolean) =>
+const PLAN_INSTRUCTIONS = (
+  codebase: string,
+  hasWeb: boolean,
+  requiresJsonText: boolean,
+) =>
   [
     "You are a Plan-Mode planner. You DO NOT modify files.",
     `Workspace: ${codebase}`,
@@ -111,11 +116,38 @@ const PLAN_INSTRUCTIONS = (codebase: string, hasWeb: boolean) =>
     hasWeb
       ? "Web tools are available (web_search/web_crawl/fetch_url). Use only when needed."
       : "Web tools are unavailable (no FIRECRAWL_API_KEY).",
-    "Output must match the provided JSON schema.",
+    requiresJsonText
+      ? 'After using tools, respond with only valid JSON in this shape: {"researchSummary":"optional summary","steps":[{"title":"step title","description":"step details","hints":["optional hint"],"complexity":"low"}]}. Do not use Markdown or add text before or after the JSON.'
+      : "Output must match the provided JSON schema.",
     "Keep it short: 1–15 steps.",
     SHARED_SYSTEM_PROMPT,
   ].join("\n");
 
+function parsePlanText(text: string): unknown {
+  const trimmed = text.trim();
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const start = trimmed.indexOf("{");
+    const end = trimmed.lastIndexOf("}");
+    if (start < 0 || end <= start) throw new Error("Plan response did not contain JSON.");
+    return JSON.parse(trimmed.slice(start, end + 1));
+  }
+}
+
+function toPlan(goal: string, rawOutput: unknown): Plan {
+  const validated = planSchema.parse(rawOutput);
+  const steps: PlanStep[] = validated.steps.map((s, i) => ({
+    id: `step-${i + 1}`,
+    title: s.title,
+    description: s.description,
+    hints: s.hints,
+    complexity: s.complexity,
+  }));
+
+  return { goal, researchSummary: validated.researchSummary, steps };
+}
 
 export async function generatePlan(goal: string) {
   const config = defaultAgentConfig();
@@ -125,9 +157,9 @@ export async function generatePlan(goal: string) {
 
   const hasWeb = !!process.env.FIRECRAWL_API_KEY;
   const model = wrapLanguageModel({
-    model:getAgentModel(),
-    middleware:extractJsonMiddleware()
-  })
+    model: getAgentModel(),
+    middleware: extractJsonMiddleware(),
+  });
 
 
   const tools = { ...readOnlyTools(executor) , ...(hasWeb ? createWebTools(tracker) : {}) };
@@ -135,36 +167,37 @@ export async function generatePlan(goal: string) {
   console.log(chalk.bold("\n🔍 Plan Mode\n"));
   globalSpinner.start("Researching & drafting a plan…");
 
-  let result;
   try {
-    result = await streamText({
+    const request = {
       model,
       tools,
-      stopWhen:stepCountIs(20),
-      system:PLAN_INSTRUCTIONS(config.codebasePath , hasWeb),
-      prompt:`User goal: \n${goal}`,
-      output:Output.object({schema:planSchema})
-    });
+      stopWhen: stepCountIs(20),
+      prompt: `User goal: \n${goal}`,
+    };
+
+    const usesGroq = getAIProvider() === "groq";
+    const result = usesGroq
+      ? await streamText({
+          ...request,
+          system: PLAN_INSTRUCTIONS(config.codebasePath, hasWeb, true),
+        })
+      : await streamText({
+          ...request,
+          system: PLAN_INSTRUCTIONS(config.codebasePath, hasWeb, false),
+          output: Output.object({ schema: planSchema }),
+        });
 
     globalSpinner.stop();
     for await (const chunk of result.textStream) {
       process.stdout.write(chalk.gray(chunk));
     }
     console.log("\n");
+    const rawOutput = usesGroq
+      ? parsePlanText(await result.text)
+      : await result.output;
+
+    return toPlan(goal, rawOutput);
   } finally {
     globalSpinner.stop();
   }
-
-  const rawOutput = await result.output;
-  const validated = planSchema.parse(rawOutput);
-
-  const steps:PlanStep[] = validated.steps.map((s , i)=>({
-    id:`step-${i+1}`,
-    title:s.title,
-    description:s.description,
-    hints:s.hints,
-    complexity:s.complexity
-  }));
-
-  return {goal , researchSummary:validated.researchSummary , steps}
 }
