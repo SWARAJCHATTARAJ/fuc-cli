@@ -1,5 +1,10 @@
 import fs from "node:fs";
 import chalk from "chalk";
+import {
+  getConfiguredModel,
+  getModelValidationError,
+  parseAIProvider,
+} from "../ai/ai.config.ts";
 
 type CheckLevel = "pass" | "warning" | "failure";
 
@@ -7,10 +12,6 @@ interface Check {
   label: string;
   level: CheckLevel;
   detail: string;
-}
-
-export function isAllowedModel(modelId: string) {
-  return modelId === "openrouter/free" || modelId.endsWith(":free");
 }
 
 function icon(level: CheckLevel): string {
@@ -44,23 +45,35 @@ export function runDoctor(): boolean {
   const bunVersion = (process.versions as { bun?: string }).bun ?? "unknown";
   add("Bun runtime", "pass", `Bun ${bunVersion}.`);
 
-  const apiKeyPresent = Boolean(process.env.OPENROUTER_API_KEY?.trim());
+  const provider = parseAIProvider();
   add(
-    "OpenRouter API key",
-    apiKeyPresent ? "pass" : "failure",
-    apiKeyPresent
-      ? "Configured (value hidden)."
-      : "Missing. Agent, Ask, and Plan modes require OPENROUTER_API_KEY.",
+    "AI provider",
+    provider ? "pass" : "failure",
+    provider
+      ? `Using ${provider}.`
+      : "AI_PROVIDER must be 'openrouter' or 'groq'.",
   );
 
-  const modelId = process.env.OPENROUTER_DEFAULT_MODEL ?? "openrouter/free";
-  add(
-    "OpenRouter model",
-    isAllowedModel(modelId) ? "pass" : "failure",
-    isAllowedModel(modelId)
-      ? `Using ${modelId}.`
-      : "OPENROUTER_DEFAULT_MODEL must be openrouter/free or end in :free.",
-  );
+  if (provider) {
+    const isGroq = provider === "groq";
+    const apiKeyName = isGroq ? "GROQ_API_KEY" : "OPENROUTER_API_KEY";
+    const apiKeyPresent = Boolean(process.env[apiKeyName]?.trim());
+    add(
+      `${isGroq ? "Groq" : "OpenRouter"} API key`,
+      apiKeyPresent ? "pass" : "failure",
+      apiKeyPresent
+        ? "Configured (value hidden)."
+        : `Missing. Agent, Ask, and Plan modes require ${apiKeyName}.`,
+    );
+
+    const modelId = getConfiguredModel(provider);
+    const modelError = getModelValidationError(provider, modelId);
+    add(
+      `${isGroq ? "Groq" : "OpenRouter"} model`,
+      modelError ? "failure" : "pass",
+      modelError ? modelError : `Using ${modelId}.`,
+    );
+  }
 
   const firecrawlPresent = Boolean(process.env.FIRECRAWL_API_KEY?.trim());
   add(

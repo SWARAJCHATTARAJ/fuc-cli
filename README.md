@@ -1,6 +1,6 @@
 # fuc-cli
 
-A local coding agent with a Telegram interface. It reads your workspace, works with an OpenRouter model, and stages file and shell changes for you to review before anything gets applied.
+A local coding agent with a Telegram interface. It reads your workspace, works with an OpenRouter or Groq model, and stages file and shell changes for you to review before anything gets applied.
 
 Built on Bun and TypeScript, using the Vercel AI SDK for the agent loop and Telegraf for Telegram.
 
@@ -57,8 +57,11 @@ Copy `.env.example` to `.env` and fill in what you need:
 
 | Variable | Required for | Notes |
 |---|---|---|
-| `OPENROUTER_API_KEY` | everything model-backed | required for Ask, Plan, and Agent |
-| `OPENROUTER_DEFAULT_MODEL` | — | optional; code permits `openrouter/free` or any model ID ending in `:free` |
+| `AI_PROVIDER` | everything model-backed | optional; `openrouter` by default, or `groq` |
+| `OPENROUTER_API_KEY` | OpenRouter | required when `AI_PROVIDER=openrouter` |
+| `OPENROUTER_DEFAULT_MODEL` | OpenRouter | optional; code permits `openrouter/free` or any model ID ending in `:free` |
+| `GROQ_API_KEY` | Groq | required when `AI_PROVIDER=groq` |
+| `GROQ_DEFAULT_MODEL` | Groq | optional; defaults to `openai/gpt-oss-20b` |
 | `FIRECRAWL_API_KEY` | web research | only needed if you want the agent to search or crawl the web |
 | `TELEGRAM_BOT_TOKEN` | Telegram mode | from BotFather |
 | `TELEGRAM_OWNER_ID` | Telegram mode | the only chat ID allowed to use the bot |

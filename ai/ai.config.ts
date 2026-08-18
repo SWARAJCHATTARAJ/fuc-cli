@@ -1,17 +1,88 @@
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { wrapLanguageModel } from "ai";
 
 const FREE_MODELS_ROUTER = "openrouter/free";
+const DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b";
+
+export type AIProvider = "openrouter" | "groq";
+
+export function parseAIProvider(value = process.env.AI_PROVIDER): AIProvider | undefined {
+  const provider = value?.trim().toLowerCase();
+
+  if (!provider || provider === "openrouter") return "openrouter";
+  if (provider === "groq") return "groq";
+  return undefined;
+}
+
+export function getAIProvider(): AIProvider {
+  const provider = parseAIProvider();
+  if (!provider) {
+    throw new Error("AI_PROVIDER must be 'openrouter' or 'groq'.");
+  }
+  return provider;
+}
+
+export function getConfiguredModel(provider: AIProvider): string {
+  if (provider === "groq") {
+    return process.env.GROQ_DEFAULT_MODEL?.trim() || DEFAULT_GROQ_MODEL;
+  }
+
+  return process.env.OPENROUTER_DEFAULT_MODEL?.trim() || FREE_MODELS_ROUTER;
+}
+
+export function getModelValidationError(
+  provider: AIProvider,
+  modelId: string,
+): string | undefined {
+  if (
+    provider === "openrouter" &&
+    modelId !== FREE_MODELS_ROUTER &&
+    !modelId.endsWith(":free")
+  ) {
+    return "OPENROUTER_DEFAULT_MODEL must be 'openrouter/free' or a model ending in ':free'.";
+  }
+
+  return undefined;
+}
 
 export function getAgentModel() {
-  const modelId = process.env.OPENROUTER_DEFAULT_MODEL || FREE_MODELS_ROUTER;
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  const providerName = getAIProvider();
+  const modelId = getConfiguredModel(providerName);
 
-  if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set");
-  if (modelId !== FREE_MODELS_ROUTER && !modelId.endsWith(":free")) {
-    throw new Error(
-      "OPENROUTER_DEFAULT_MODEL must be 'openrouter/free' or a model ending in ':free'",
-    );
+  if (providerName === "groq") {
+    const apiKey = process.env.GROQ_API_KEY?.trim();
+    if (!apiKey) throw new Error("GROQ_API_KEY is not set");
+
+    const provider = createOpenAICompatible({
+      name: "groq",
+      apiKey,
+      baseURL: "https://api.groq.com/openai/v1",
+      includeUsage: true,
+    });
+    return wrapLanguageModel({
+      model: provider(modelId),
+      middleware: {
+        transformParams: async ({ params }) => ({
+          ...params,
+          prompt: params.prompt.map((message) => {
+            if (message.role !== "assistant") return message;
+
+            return {
+              ...message,
+              content: message.content.filter((part) => part.type !== "reasoning"),
+            };
+          }),
+        }),
+      },
+    });
   }
+
+  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+  if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set");
+
+  const modelError = getModelValidationError(providerName, modelId);
+  if (modelError) throw new Error(modelError);
 
   const provider = createOpenRouter({ apiKey });
   return provider(modelId);
