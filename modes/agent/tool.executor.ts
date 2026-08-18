@@ -40,6 +40,18 @@ export class ToolExecutor {
     private readonly config: AgentConfig,
   ) {}
 
+  /**
+   * Tool results become part of the next model request. Keep them bounded so a
+   * broad file listing or large source file cannot exceed the provider limit.
+   */
+  private limitToolOutput(output: string, toolName: string): string {
+    const limit = Math.max(512, this.config.maxToolOutputChars);
+    if (output.length <= limit) return output;
+
+    const suffix = `\n\n[${toolName} output truncated; use a narrower path or pattern.]`;
+    return output.slice(0, Math.max(0, limit - suffix.length)) + suffix;
+  }
+
   private resolveSafe(rel: string): string {
     const abs = path.resolve(this.config.codebasePath, rel);
     const root = path.resolve(this.config.codebasePath);
@@ -127,7 +139,7 @@ export class ToolExecutor {
       details: { after: text, toolName: "read_file" },
       status: "executed",
     });
-    return text;
+    return this.limitToolOutput(text, "read_file");
   }
 
   createFile(rel: string, content: string): string {
@@ -241,7 +253,7 @@ export class ToolExecutor {
       details: { after: out, toolName: "list_files" },
       status: "executed",
     });
-    return out || "(empty)";
+    return this.limitToolOutput(out || "(empty)", "list_files");
   }
 
   async searchFiles(
@@ -330,7 +342,7 @@ export class ToolExecutor {
       details: { after: out || "(no matches)", toolName: "search_files" },
       status: "executed",
     });
-    return out || "(no matches)";
+    return this.limitToolOutput(out || "(no matches)", "search_files");
   }
 
   async analyzeCodebase(rootRel: string): Promise<string> {
@@ -420,7 +432,7 @@ export class ToolExecutor {
       details: { after: out || "(none)", toolName: "list_skills" },
       status: "executed",
     });
-    return out || "(none)";
+    return this.limitToolOutput(out || "(none)", "list_skills");
   }
 
   async readSkill(skillPath: string): Promise<string> {
@@ -445,7 +457,7 @@ export class ToolExecutor {
       details: { after: text, toolName: "read_skill" },
       status: "executed",
     });
-    return text;
+    return this.limitToolOutput(text, "read_skill");
   }
 
   applyApprovedFromTracker(): { errors: string[], appliedCount: number } {

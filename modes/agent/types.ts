@@ -28,6 +28,8 @@ export interface ActionLog {
 export interface AgentConfig {
   codebasePath: string;
   maxFileSizeToRead: number;
+  /** Maximum number of characters a read-only tool may send back to the model. */
+  maxToolOutputChars: number;
   maxDirectoryDepth: number;
   maxFilesToProcess: number;
   excludePatterns: string[];
@@ -42,6 +44,8 @@ export interface AgentConfig {
 export const defaultAgentConfig = (): AgentConfig => ({
   codebasePath: process.cwd(),
   maxFileSizeToRead: 1024 * 1024 * 2,
+  // Keep tool responses comfortably below Groq's 8k TPM limit after system and tool schemas.
+  maxToolOutputChars: parseInt(process.env.FUC_MAX_TOOL_OUTPUT_CHARS || "6000", 10),
   maxDirectoryDepth: parseInt(process.env.FUC_MAX_DEPTH || "10", 10),
   maxFilesToProcess: parseInt(process.env.FUC_MAX_FILES || "5000", 10),
   excludePatterns: [

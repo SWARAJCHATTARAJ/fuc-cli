@@ -67,6 +67,7 @@ Copy `.env.example` to `.env` and fill in what you need:
 | `TELEGRAM_OWNER_ID` | Telegram mode | the only chat ID allowed to use the bot |
 | `SKILLS_DIRS` | — | optional, semicolon-delimited paths to skill directories |
 | `FUC_ALLOW_SHELL` | shell execution | off by default; set to `1` to let the agent stage shell commands at all |
+| `FUC_MAX_TOOL_OUTPUT_CHARS` | — | optional; maximum characters returned by a read-only tool, default 6000 |
 | `FUC_MAX_DEPTH` | — | optional; max directory traversal depth during search/list/analyze, default 10 |
 | `FUC_MAX_FILES` | — | optional; max files processed during traversal, default 5000 |
 
@@ -86,7 +87,7 @@ The agent can read your workspace freely. It cannot write, delete, or run shell 
 
 - File and folder changes are staged first. You see a diff before anything is written.
 - Shell commands are disabled by default, on top of the approval gate. You have to opt in with `FUC_ALLOW_SHELL=1`, and even then, each command needs its own separate confirmation, shown in full, not folded into a general "approve all" for file changes.
-- All file operations, including reads from configured skill directories, are restricted to the configured workspace directory using real path resolution, not string matching, so symlinks pointing outside the workspace are rejected. Depth and file-count limits during traversal are configurable via `FUC_MAX_DEPTH` (default 10) and `FUC_MAX_FILES` (default 5000).
+- All file operations, including reads from configured skill directories, are restricted to the configured workspace directory using real path resolution, not string matching, so symlinks pointing outside the workspace are rejected. Read-only tool results are capped at 6,000 characters by default; directory traversal depth and file-count limits are configurable via `FUC_MAX_DEPTH` (default 10) and `FUC_MAX_FILES` (default 5000).
 
 ## Known limitations
 
