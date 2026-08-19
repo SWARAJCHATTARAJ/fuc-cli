@@ -18,8 +18,11 @@ function clip(s: string, n = 8000): string {
 }
 
 export function createWebTools(tracker: ActionTracker) {
-  return {
-    web_search: tool({
+  const tools: Record<string, any> = {};
+  const hasFirecrawl = Boolean(process.env.FIRECRAWL_API_KEY?.trim());
+
+  if (hasFirecrawl) {
+    tools.web_search = tool({
       description: "Search the web. Returns title/url/snippet list.",
       inputSchema: z.object({
         query: z.string().min(1),
@@ -52,9 +55,9 @@ export function createWebTools(tracker: ActionTracker) {
 
         return clip(out);
       },
-    }),
+    });
 
-     web_crawl: tool({
+    tools.web_crawl = tool({
       description: 'Scrape a URL into markdown text.',
       inputSchema: z.object({ url: z.string().url() }),
       execute: async ({ url }) => {
@@ -68,23 +71,25 @@ export function createWebTools(tracker: ActionTracker) {
         });
         return clip(md) || '(empty)';
       },
-    }),
+    });
+  }
 
-    fetch_url: tool({
-      description: 'HTTP GET for a URL. Returns response body.',
-      inputSchema: z.object({ url: z.string().url() }),
-      execute: async ({ url }) => {
-        const r = await fetch(url, { redirect: 'follow' });
-        const body = await r.text();
-        const out = clip(body, 16_000);
-        tracker.log({
-          type: 'code_analysis',
-          path: `fetch:${url}`,
-          details: { after: `HTTP ${r.status}\n\n${out}`, toolName: 'fetch_url' },
-          status: 'executed',
-        });
-        return `HTTP ${r.status}\n\n${out}`;
-      },
-    }),
-  };
+  tools.fetch_url = tool({
+    description: 'HTTP GET for a URL. Returns response body.',
+    inputSchema: z.object({ url: z.string().url() }),
+    execute: async ({ url }) => {
+      const r = await fetch(url, { redirect: 'follow' });
+      const body = await r.text();
+      const out = clip(body, 16_000);
+      tracker.log({
+        type: 'code_analysis',
+        path: `fetch:${url}`,
+        details: { after: `HTTP ${r.status}\n\n${out}`, toolName: 'fetch_url' },
+        status: 'executed',
+      });
+      return `HTTP ${r.status}\n\n${out}`;
+    },
+  });
+
+  return tools;
 }

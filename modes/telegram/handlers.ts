@@ -6,6 +6,7 @@ import { runAgent, runAsk, runPlanSteps } from "./agent-run";
 import { generatePlan } from "../plan/planner";
 import { planKeyboard, planMessage, planSessions, refreshPlanUi, type PlanSession } from "./plan-session";
 import { approvalDiff, approvalSessions, clearApprovalSession } from "./approval-session";
+import { getAIErrorMessage } from "../../ai/errors";
 
 export function registerHandlers(bot: Telegraf) {
   bot.command("start", async (ctx) => {
@@ -22,7 +23,11 @@ export function registerHandlers(bot: Telegraf) {
       });
 
     await ctx.reply("🔍 Researching your question…");
-    void runAsk(ctx, q).catch(console.error);
+    runAsk(ctx, q).catch(err => {
+      const msg = getAIErrorMessage(err);
+      if (msg) ctx.reply(`❌ ${msg}`);
+      else console.error(err);
+    });
   });
 
   bot.command("agent", async (ctx) => {
@@ -33,7 +38,11 @@ export function registerHandlers(bot: Telegraf) {
         parse_mode: "Markdown",
       });
     await ctx.reply("🤖 Agent is working on your task…");
-    void runAgent(ctx, ctx.chat.id, goal).catch(console.error);
+    runAgent(ctx, ctx.chat.id, goal).catch(err => {
+      const msg = getAIErrorMessage(err);
+      if (msg) ctx.reply(`❌ ${msg}`);
+      else console.error(err);
+    });
   });
 
   bot.command("plan", async (ctx) => {
@@ -52,7 +61,11 @@ export function registerHandlers(bot: Telegraf) {
         const session:PlanSession = {plan , selected:new Set(plan.steps.map((s)=>s.id))}
         await ctx.reply(planMessage(session) , {parse_mode:"Markdown", ...planKeyboard(session)});
          planSessions.set(ctx.chat.id, session);
-    })().catch(console.error)
+    })().catch(err => {
+      const msg = getAIErrorMessage(err);
+      if (msg) ctx.reply(`❌ ${msg}`);
+      else console.error(err);
+    });
   });
 
     bot.action(/^plan_toggle:(.+)$/, async (ctx) => {
@@ -101,7 +114,11 @@ export function registerHandlers(bot: Telegraf) {
     await ctx.editMessageText(`🚀 Executing ${steps.length} step(s)…\n\n${list}`);
     await ctx.answerCbQuery();
 
-    void runPlanSteps(ctx, ctx.chat!.id, plan, steps).catch(console.error);
+    void runPlanSteps(ctx, ctx.chat!.id, plan, steps).catch(err => {
+      const msg = getAIErrorMessage(err);
+      if (msg) ctx.reply(`❌ ${msg}`);
+      else console.error(err);
+    });
   });
 
   bot.command("cancel", async (ctx) => {

@@ -51,25 +51,27 @@ export function runDoctor(): boolean {
     provider ? "pass" : "failure",
     provider
       ? `Using ${provider}.`
-      : "AI_PROVIDER must be 'openrouter' or 'groq'.",
+      : "AI_PROVIDER must be 'openrouter', 'groq', or 'local'.",
   );
 
   if (provider) {
-    const isGroq = provider === "groq";
-    const apiKeyName = isGroq ? "GROQ_API_KEY" : "OPENROUTER_API_KEY";
-    const apiKeyPresent = Boolean(process.env[apiKeyName]?.trim());
-    add(
-      `${isGroq ? "Groq" : "OpenRouter"} API key`,
-      apiKeyPresent ? "pass" : "failure",
-      apiKeyPresent
-        ? "Configured (value hidden)."
-        : `Missing. Agent, Ask, and Plan modes require ${apiKeyName}.`,
-    );
+    if (provider !== "local") {
+      const isGroq = provider === "groq";
+      const apiKeyName = isGroq ? "GROQ_API_KEY" : "OPENROUTER_API_KEY";
+      const apiKeyPresent = Boolean(process.env[apiKeyName]?.trim());
+      add(
+        `${isGroq ? "Groq" : "OpenRouter"} API key`,
+        apiKeyPresent ? "pass" : "failure",
+        apiKeyPresent
+          ? "Configured (value hidden)."
+          : `Missing. Agent, Ask, and Plan modes require ${apiKeyName}.`,
+      );
+    }
 
     const modelId = getConfiguredModel(provider);
     const modelError = getModelValidationError(provider, modelId);
     add(
-      `${isGroq ? "Groq" : "OpenRouter"} model`,
+      `${provider === "groq" ? "Groq" : provider === "local" ? "Local" : "OpenRouter"} model`,
       modelError ? "failure" : "pass",
       modelError ? modelError : `Using ${modelId}.`,
     );

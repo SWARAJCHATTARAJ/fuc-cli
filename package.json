@@ -6,6 +6,9 @@
   "bin": {
     "fuc-code": "./index.ts"
   },
+  "scripts": {
+    "test": "bun test"
+  },
   "devDependencies": {
     "@types/bun": "^1.3.14",
     "@types/node": "^26.2.0"

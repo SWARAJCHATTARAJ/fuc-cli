@@ -34,11 +34,26 @@ export function getAIErrorMessage(error: unknown): string | undefined {
   const record = asRecord(error);
   if (!record) return undefined;
 
+  const provider = providerLabel();
+  
+  if (record.name === "AI_APICallError") {
+     const message = typeof record.message === "string" ? record.message : "";
+     if (message.includes("ECONNREFUSED") || message.includes("Unable to connect") || message.includes("fetch failed")) {
+         return `${provider} API is unreachable (Connection refused). Ensure the provider url is correct and the server is running.`;
+     }
+     if (message.includes("timeout") || message.includes("Timeout")) {
+         return `${provider} API request timed out. Please try again.`;
+     }
+  }
+
+  if (typeof record.message === "string" && (record.message.includes("ECONNREFUSED") || record.message.includes("fetch failed"))) {
+      return `${provider} API is unreachable (Connection refused). Ensure the server is running.`;
+  }
+
   const statusCode = record.statusCode;
   if (typeof statusCode !== "number") return undefined;
 
   const message = typeof record.message === "string" ? record.message : "Request failed.";
-  const provider = providerLabel();
 
   if (statusCode === 429) {
     const reset = formatResetTime(

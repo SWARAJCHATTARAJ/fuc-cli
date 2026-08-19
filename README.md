@@ -53,15 +53,23 @@ bun run index.ts --help
 
 ### Environment variables
 
-Copy `.env.example` to `.env` and fill in what you need:
+The project supports three interchangeable AI providers:
+- **openrouter**: Routes to many different hosted models. Great for variety and free-tier access (defaults to `openrouter/free`).
+- **groq**: Groq's own hardware-hosted models. Great for speed and has a separate free tier.
+- **local**: A self-hosted GGUF model via llama.cpp's `llama-server`. Runs entirely offline once loaded. Great for privacy, offline use, and no rate limits, though model quality depends on your hardware.
+
+Copy `.env.example` to `.env` and fill in what you need. Ensure only one `AI_PROVIDER` is active at a time:
 
 | Variable | Required for | Notes |
 |---|---|---|
-| `AI_PROVIDER` | everything model-backed | optional; `openrouter` by default, or `groq` |
+| `AI_PROVIDER` | everything model-backed | `openrouter`, `groq`, or `local` (default: `openrouter`) |
 | `OPENROUTER_API_KEY` | OpenRouter | required when `AI_PROVIDER=openrouter` |
 | `OPENROUTER_DEFAULT_MODEL` | OpenRouter | optional; code permits `openrouter/free` or any model ID ending in `:free` |
 | `GROQ_API_KEY` | Groq | required when `AI_PROVIDER=groq` |
 | `GROQ_DEFAULT_MODEL` | Groq | optional; defaults to `openai/gpt-oss-20b` |
+| `LOCAL_MODEL_BASE_URL` | Local | optional; defaults to `http://127.0.0.1:8080/v1` |
+| `LOCAL_MODEL_NAME` | Local | optional |
+| `LOCAL_MODEL_API_KEY` | Local | optional |
 | `FIRECRAWL_API_KEY` | web research | only needed if you want the agent to search or crawl the web |
 | `TELEGRAM_BOT_TOKEN` | Telegram mode | from BotFather |
 | `TELEGRAM_OWNER_ID` | Telegram mode | the only chat ID allowed to use the bot |

@@ -5,25 +5,29 @@ import { wrapLanguageModel } from "ai";
 const FREE_MODELS_ROUTER = "openrouter/free";
 const DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b";
 
-export type AIProvider = "openrouter" | "groq";
+export type AIProvider = "openrouter" | "groq" | "local";
 
 export function parseAIProvider(value = process.env.AI_PROVIDER): AIProvider | undefined {
   const provider = value?.trim().toLowerCase();
 
   if (!provider || provider === "openrouter") return "openrouter";
   if (provider === "groq") return "groq";
+  if (provider === "local") return "local";
   return undefined;
 }
 
 export function getAIProvider(): AIProvider {
   const provider = parseAIProvider();
   if (!provider) {
-    throw new Error("AI_PROVIDER must be 'openrouter' or 'groq'.");
+    throw new Error("AI_PROVIDER must be 'openrouter', 'groq', or 'local'.");
   }
   return provider;
 }
 
 export function getConfiguredModel(provider: AIProvider): string {
+  if (provider === "local") {
+    return process.env.LOCAL_MODEL_NAME?.trim() || "local-model";
+  }
   if (provider === "groq") {
     return process.env.GROQ_DEFAULT_MODEL?.trim() || DEFAULT_GROQ_MODEL;
   }
@@ -49,6 +53,19 @@ export function getModelValidationError(
 export function getAgentModel() {
   const providerName = getAIProvider();
   const modelId = getConfiguredModel(providerName);
+
+  if (providerName === "local") {
+    const baseURL = process.env.LOCAL_MODEL_BASE_URL?.trim() || "http://127.0.0.1:8080/v1";
+    const apiKey = process.env.LOCAL_MODEL_API_KEY?.trim() || "not-needed";
+
+    const provider = createOpenAICompatible({
+      name: "local",
+      apiKey,
+      baseURL,
+      includeUsage: true,
+    });
+    return provider(modelId);
+  }
 
   if (providerName === "groq") {
     const apiKey = process.env.GROQ_API_KEY?.trim();
@@ -126,4 +143,10 @@ When writing or editing code, follow these rules before producing output:
 8. If a change would need to touch more than a few files to be done
    properly, say so and propose the scope before writing all of it,
    rather than silently expanding a small request into a large one.
+
+9. CRITICAL TOOL USAGE: You are an agent equipped with workspace tools. 
+   If asked to create, edit, or delete a file, you MUST use the provided
+   tools (create_file, modify_file, delete_file). DO NOT output code 
+   directly in markdown blocks if it is meant to be saved. You MUST 
+   invoke the appropriate tool.
 `;
