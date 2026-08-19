@@ -1,6 +1,36 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { wrapLanguageModel } from "ai";
+import type { LanguageModelV1 } from "@ai-sdk/provider";
+
+export function fallback(models: LanguageModelV1[]): LanguageModelV1 {
+  const primary = models[0];
+  return new Proxy(primary, {
+    get(target, prop, receiver) {
+      if (prop === 'doGenerate') {
+        return async (options: Parameters<LanguageModelV1['doGenerate']>[0]) => {
+          let lastError;
+          for (const model of models) {
+            try { return await model.doGenerate(options); }
+            catch (error) { lastError = error; }
+          }
+          throw lastError;
+        };
+      }
+      if (prop === 'doStream') {
+        return async (options: Parameters<LanguageModelV1['doStream']>[0]) => {
+          let lastError;
+          for (const model of models) {
+            try { return await model.doStream(options); }
+            catch (error) { lastError = error; }
+          }
+          throw lastError;
+        };
+      }
+      return Reflect.get(target, prop, receiver);
+    }
+  });
+}
 
 const FREE_MODELS_ROUTER = "openrouter/free";
 const DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b";
@@ -50,21 +80,105 @@ export function getModelValidationError(
   return undefined;
 }
 
+import { spawn } from "child_process";
+import { existsSync } from "fs";
+
+let isStartingServer = false;
+
+async function ensureLocalServerRunning(): Promise<void> {
+  const baseURL = process.env.LOCAL_MODEL_BASE_URL?.trim() || "http://127.0.0.1:8080/v1";
+  
+  try {
+    const res = await fetch(`${baseURL}/models`);
+    if (res.ok) return;
+  } catch (e) {
+    // not running
+  }
+
+  if (isStartingServer) {
+     for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 1000));
+        try {
+           if ((await fetch(`${baseURL}/models`)).ok) return;
+        } catch (e) {}
+     }
+     throw new Error("Local AI server failed to start.");
+  }
+
+  isStartingServer = true;
+  
+  const exePath = "D:\\llamafile\\llamafile-0.10.5.exe";
+  const modelPath = "D:\\llamafile\\qwen2.5-coder-7b-instruct-q4_k_m.gguf";
+
+  if (!existsSync(exePath) || !existsSync(modelPath)) {
+    isStartingServer = false;
+    throw new Error(`Cannot start local AI. Please ensure the files exist on your D: drive. Missing files: ${exePath} or ${modelPath}`);
+  }
+
+  console.log("\n[FUC CLI] Auto-starting local AI server from D:\\llamafile...");
+  
+  const child = spawn(exePath, [
+    "-m", modelPath,
+    "--port", "8080"
+  ], {
+    detached: true,
+    stdio: 'ignore'
+  });
+  child.unref();
+
+  for (let i = 0; i < 30; i++) {
+    await new Promise(r => setTimeout(r, 1000));
+    try {
+      if ((await fetch(`${baseURL}/models`)).ok) {
+        console.log("[FUC CLI] Local AI server is ready!");
+        isStartingServer = false;
+        return;
+      }
+    } catch (e) {}
+  }
+  
+  isStartingServer = false;
+  throw new Error("Local AI server failed to start within 30 seconds.");
+}
+
+function getLocalModel(): LanguageModelV1 {
+  const baseURL = process.env.LOCAL_MODEL_BASE_URL?.trim() || "http://127.0.0.1:8080/v1";
+  const apiKey = process.env.LOCAL_MODEL_API_KEY?.trim() || "not-needed";
+  const modelId = getConfiguredModel("local");
+
+  const provider = createOpenAICompatible({
+    name: "local",
+    apiKey,
+    baseURL,
+    includeUsage: true,
+  });
+  const internalModel = provider(modelId);
+
+  return new Proxy(internalModel, {
+    get(target, prop, receiver) {
+      if (prop === 'doGenerate') {
+        return async (options: Parameters<LanguageModelV1['doGenerate']>[0]) => {
+          await ensureLocalServerRunning();
+          return internalModel.doGenerate(options);
+        };
+      }
+      if (prop === 'doStream') {
+        return async (options: Parameters<LanguageModelV1['doStream']>[0]) => {
+          await ensureLocalServerRunning();
+          return internalModel.doStream(options);
+        };
+      }
+      return Reflect.get(target, prop, receiver);
+    }
+  });
+}
+
 export function getAgentModel() {
   const providerName = getAIProvider();
   const modelId = getConfiguredModel(providerName);
 
   if (providerName === "local") {
-    const baseURL = process.env.LOCAL_MODEL_BASE_URL?.trim() || "http://127.0.0.1:8080/v1";
-    const apiKey = process.env.LOCAL_MODEL_API_KEY?.trim() || "not-needed";
-
-    const provider = createOpenAICompatible({
-      name: "local",
-      apiKey,
-      baseURL,
-      includeUsage: true,
-    });
-    return provider(modelId);
+    return getLocalModel();
   }
 
   if (providerName === "groq") {
@@ -77,7 +191,8 @@ export function getAgentModel() {
       baseURL: "https://api.groq.com/openai/v1",
       includeUsage: true,
     });
-    return wrapLanguageModel({
+    
+    const groqModel = wrapLanguageModel({
       model: provider(modelId),
       middleware: {
         transformParams: async ({ params }) => ({
@@ -93,6 +208,8 @@ export function getAgentModel() {
         }),
       },
     });
+    
+    return fallback([groqModel, getLocalModel()]);
   }
 
   const apiKey = process.env.OPENROUTER_API_KEY?.trim();
@@ -102,7 +219,9 @@ export function getAgentModel() {
   if (modelError) throw new Error(modelError);
 
   const provider = createOpenRouter({ apiKey });
-  return provider(modelId);
+  const openRouterModel = provider(modelId);
+  
+  return fallback([openRouterModel, getLocalModel()]);
 }
 
 export const SHARED_SYSTEM_PROMPT = `

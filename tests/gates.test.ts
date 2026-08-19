@@ -23,9 +23,9 @@ describe("ToolExecutor Gates", () => {
     if (fs.existsSync(symlinkDir)) fs.rmSync(symlinkDir, { recursive: true, force: true });
     fs.symlinkSync(outsideDir, symlinkDir, "junction");
 
-    expect(() => executor.readFile("shortcut/secret.txt")).toThrow("resolved path");
-    expect(() => executor.createFile("shortcut/newfile.txt", "hacked")).toThrow("resolved path");
-    expect(() => executor.deleteFile("shortcut/secret.txt")).toThrow("resolved path");
+    expect(() => executor.readFile("shortcut/secret.txt")).toThrow("Path escapes workspace");
+    expect(() => executor.createFile("shortcut/newfile.txt", "hacked")).toThrow("Path escapes workspace");
+    expect(() => executor.deleteFile("shortcut/secret.txt")).toThrow("Path escapes workspace");
     
     fs.rmSync(symlinkDir, { recursive: true, force: true });
     fs.rmSync(outsideDir, { recursive: true, force: true });
@@ -39,7 +39,7 @@ describe("ToolExecutor Gates", () => {
     const trackerNoShell = new ActionTracker();
     const executorNoShell = new ToolExecutor(trackerNoShell, configNoShell);
     
-    expect(() => executorNoShell.queueShell("echo hello")).toThrow("Shell execution is disabled");
+    expect(() => executorNoShell.queueShell("echo hello")).toThrow("Shell execution disabled");
     
     process.env.FUC_ALLOW_SHELL = original;
   });
@@ -52,7 +52,7 @@ describe("ToolExecutor Gates", () => {
     const executorShell = new ToolExecutor(trackerShell, configShell);
     
     const result = executorShell.queueShell("echo hello");
-    expect(result).toContain("Staged shell command");
+    expect(result).toContain("Shell queued");
     
     process.env.FUC_ALLOW_SHELL = original;
   });

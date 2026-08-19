@@ -1,4 +1,26 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, mock } from "bun:test";
+
+mock.module("ai", () => {
+  return {
+    streamText: async () => ({
+      textStream: [],
+      text: Promise.resolve(JSON.stringify({
+        researchSummary: "mock summary",
+        steps: [{ title: "Edit types", description: "Add debug boolean" }]
+      })),
+      output: Promise.resolve({
+        researchSummary: "mock summary",
+        steps: [{ title: "Edit types", description: "Add debug boolean" }]
+      })
+    }),
+    tool: () => ({}),
+    wrapLanguageModel: (opts: any) => opts.model,
+    extractJsonMiddleware: () => ({}),
+    stepCountIs: () => () => false,
+    Output: { object: () => ({}) }
+  };
+});
+
 import { generatePlan } from "../modes/plan/planner.ts";
 
 describe("Plan generation", () => {
@@ -7,5 +29,5 @@ describe("Plan generation", () => {
     const result = await generatePlan(goal);
     expect(result.goal).toBe(goal);
     expect(result.steps.length).toBeGreaterThan(0);
-  }, 30000); // 30s timeout
+  });
 });
