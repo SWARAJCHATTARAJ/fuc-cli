@@ -120,6 +120,7 @@ const PLAN_INSTRUCTIONS = (
       ? 'After using tools, respond with only valid JSON in this shape: {"researchSummary":"optional summary","steps":[{"title":"step title","description":"step details","hints":["optional hint"],"complexity":"low"}]}. Do not use Markdown or add text before or after the JSON.'
       : "Output must match the provided JSON schema.",
     "Keep it short: 1–15 steps.",
+    "Make each step concrete and actionable. Do not use vague descriptions like 'improve the code'. Instead, be specific, e.g., 'add null check before line 42 in foo.ts'.",
     SHARED_SYSTEM_PROMPT,
   ].join("\n");
 

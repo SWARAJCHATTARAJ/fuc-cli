@@ -111,7 +111,13 @@ export async function runAskMode() {
   const agent = new ToolLoopAgent({
     model: getAgentModel(),
     stopWhen: stepCountIs(20),
-    instructions: SHARED_SYSTEM_PROMPT,
+    instructions: [
+      "You are an Ask-Mode assistant. Your job is to answer questions about the codebase.",
+      "1. Answer the specific question asked without unnecessary preamble.",
+      "2. Cite the actual file and line number when referencing code.",
+      "3. Say plainly when something isn't found rather than guessing.",
+      SHARED_SYSTEM_PROMPT
+    ].join("\n"),
     tools,
   });
 

@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import { confirm, isCancel, text } from "@clack/prompts";
 import { ToolLoopAgent, stepCountIs } from "ai";
-import { getAgentModel } from "../../ai/ai.config.ts";
+import { getAgentModel, SHARED_SYSTEM_PROMPT } from "../../ai/ai.config.ts";
 import { ActionTracker } from "../agent/action.tracker.ts";
 import { ToolExecutor } from "../agent/tool.executor.ts";
 import { createAgentTools } from "../agent/agent-tool.ts";
@@ -55,6 +55,11 @@ export async function runPlanMode(): Promise<void> {
     const agent = new ToolLoopAgent({
       model:getAgentModel(),
       stopWhen:stepCountIs(30),
+      instructions: [
+        `Workspace root: ${config.codebasePath}`,
+        "All mutations are staged until approval.",
+        SHARED_SYSTEM_PROMPT,
+      ].join("\n"),
       tools
     });
 
