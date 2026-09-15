@@ -1,4 +1,4 @@
-import {select , isCancel, confirm} from "@clack/prompts";
+import { select, isCancel, confirm, intro, outro, note } from "@clack/prompts";
 import chalk from "chalk"
 import figlet from "figlet";
 import { resolve } from "path";
@@ -10,7 +10,6 @@ const SHADOW = chalk.hex('#37359e');
 const FACE = chalk.hex('#ac9cc1').bold;
 
 function printBannerWithShadow(ascii: string) {
-
   const bannerLines = ascii.replace(/\s+$/, '').split('\n');
   const maxLen = Math.max(...bannerLines.map((l) => l.length), 0);
   const rowWidth = maxLen + 2;
@@ -25,8 +24,6 @@ function printBannerWithShadow(ascii: string) {
   console.log();
 }
 
-
-
 export async function runWakeup() {
     let ascii:string;
     try {
@@ -36,9 +33,10 @@ export async function runWakeup() {
     }
 
     printBannerWithShadow(ascii)
+    intro(chalk.bgHex('#ac9cc1').black(' FUC-CLI Engine '));
 
     const workspacePath = resolve(process.cwd());
-    console.log(`\nWorkspace: ${workspacePath}\n`);
+    note(workspacePath, 'Current Workspace');
 
     const useWorkspace = await confirm({
         message: "Use this folder as the workspace?",
@@ -46,21 +44,21 @@ export async function runWakeup() {
     });
 
     if (isCancel(useWorkspace) || !useWorkspace) {
-        console.log(chalk.dim('\n Goodbye. \n'));
+        outro(chalk.dim('Goodbye.'));
         process.exit(0);
     }
 
     const mode = await select({
-        message:"Which mode you want to proceed with?",
+        message:"Where would you like to run the agent?",
         options:[
-            {value:"cli" , label:"CLI"},
-            {value:"telegram" , label:"Telegram"},
-            {value:"exit" , label:"Exit"}
+            {value:"cli" , label:"💻 Terminal (Local)"},
+            {value:"telegram" , label:"📱 Telegram (Remote)"},
+            {value:"exit" , label:"🚪 Exit"}
         ]
     });
 
     if(isCancel(mode) || mode === "exit"){
-        console.log(chalk.dim('\n Goodbye. \n'));
+        outro(chalk.dim('Goodbye.'));
         return;
     }
 

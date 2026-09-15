@@ -1,3 +1,4 @@
+import { intro, outro } from "@clack/prompts";
 import {
   Output,
   extractJsonMiddleware,
@@ -165,8 +166,8 @@ export async function generatePlan(goal: string) {
 
   const tools = { ...readOnlyTools(executor) , ...(hasWeb ? createWebTools(tracker) : {}) };
 
-  console.log(chalk.bold("\n🔍 Plan Mode\n"));
-  globalSpinner.start("Researching & drafting a plan…");
+  intro(chalk.bgMagenta.black(" 🧭 Plan Mode "));
+  globalSpinner.start("Researching & drafting a plan...");
 
   try {
     const request = {
@@ -193,6 +194,19 @@ export async function generatePlan(goal: string) {
       process.stdout.write(chalk.gray(chunk));
     }
     console.log("\n");
+
+    try {
+      const usage = await (result as any).usage;
+      if (usage) {
+        const prompt = usage.promptTokens ?? 0;
+        const comp = usage.completionTokens ?? 0;
+        const total = usage.totalTokens ?? (prompt + comp);
+        if (total > 0) {
+          console.log(chalk.dim(`\n  📊 Token Consumption ─ Prompt: ${prompt} | Completion: ${comp} | Total: ${total}\n`));
+        }
+      }
+    } catch (e) {}
+
     const rawOutput = usesGroq
       ? parsePlanText(await result.text)
       : await result.output;

@@ -25,11 +25,16 @@ export function planMessage(session: PlanSession): string {
 }
 
 export function planKeyboard(session: PlanSession) {
-  const rows = session.plan.steps.map((step, i) => {
+  const buttons = session.plan.steps.map((step, i) => {
     const mark = session.selected.has(step.id) ? '✅' : '⬜';
-    const label = `${mark} Step ${i + 1}: ${step.title}`;
-    return [Markup.button.callback(label, `plan_toggle:${step.id}`)];
+    return Markup.button.callback(`${mark} ${i + 1}`, `plan_toggle:${step.id}`);
   });
+
+  const rows = [];
+  for (let i = 0; i < buttons.length; i += 5) {
+    rows.push(buttons.slice(i, i + 5));
+  }
+
   return Markup.inlineKeyboard([
     ...rows,
     [

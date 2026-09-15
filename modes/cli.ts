@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { select, isCancel } from "@clack/prompts";
+import { select, isCancel, outro } from "@clack/prompts";
 import { runAgentMode } from "./agent/orchestrator";
 import { runAskMode } from "./ask/orchestrator";
 import { runPlanMode } from "./plan/orchestrator";
@@ -8,16 +8,19 @@ import { getAIErrorMessage } from "../ai/errors";
 export async function runCliMode() {
   while (true) {
     const mode = await select({
-      message: "Choose CLI sub-mode",
+      message: "Choose Agent Mode",
       options: [
-        { value: "agent", label: "Agent Mode" },
-        { value: "plan", label: "Plan Mode" },
-        { value: "ask", label: "Ask Mode" },
+        { value: "agent", label: "🤖 Agent (Autonomous Coding)" },
+        { value: "plan", label: "🧭 Plan (Multi-step Architecture)" },
+        { value: "ask", label: "💡 Ask (Codebase Q&A)" },
         { value: "back", label: "← Back to main menu" },
       ],
     });
 
-    if (isCancel(mode) || mode === "back") return;
+    if (isCancel(mode) || mode === "back") {
+      outro(chalk.dim('Returning to main menu...'));
+      return;
+    }
 
     try {
       if (mode === "agent") {

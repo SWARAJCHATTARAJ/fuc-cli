@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { confirm, isCancel, text } from "@clack/prompts";
+import { select, isCancel, text, confirm, intro, outro, note } from "@clack/prompts";
 import { ToolLoopAgent, stepCountIs } from "ai";
 import { getAgentModel, SHARED_SYSTEM_PROMPT } from "../../ai/ai.config.ts";
 import { ActionTracker } from "../agent/action.tracker.ts";
@@ -21,10 +21,13 @@ function stepPrompt(goal: string, step: PlanStep): string {
 
 
 export async function runPlanMode(): Promise<void> {
-  console.log(chalk.bold("\n🧭 Plan Mode\n"));
+  intro(chalk.bgMagenta.black(" 🧭 Architecture Plan Mode "));
 
-  const goal = await text({ message: "What is your goal?" });
-  if (isCancel(goal) || !goal.trim()) return;
+  const goal = await text({ message: "What is your goal?", placeholder: "E.g. Refactor the database schema..." });
+  if (isCancel(goal) || !goal.trim()) {
+    outro(chalk.dim("Canceled."));
+    return;
+  }
 
   const plan = await generatePlan(goal);
 
@@ -69,7 +72,15 @@ export async function runPlanMode(): Promise<void> {
       onStepFinish: ({ toolCalls }) => {
         globalSpinner.stop();
         for (const tc of toolCalls) {
-          const preview = JSON.stringify(tc.input).slice(0, 160);
+          let preview = "";
+          try {
+            const input = tc.input as any;
+            if (tc.toolName === 'execute_shell' || tc.toolName === 'execute_shell_autonomous') preview = String(input.command || '');
+            else if (tc.toolName === 'create_file' || tc.toolName === 'modify_file') preview = `${input.path} (${String(input.content || '').length} bytes)`;
+            else preview = String(input.path || input.root || JSON.stringify(input));
+          } catch { preview = JSON.stringify(tc.input); }
+          
+          preview = preview.slice(0, 160);
           console.log(
             chalk.green("  ✓"),
             chalk.bold(String(tc.toolName)),
@@ -82,10 +93,16 @@ export async function runPlanMode(): Promise<void> {
     globalSpinner.stop();
 
     let fullText = "";
+    let isFirstChunk = true;
     for await (const chunk of r.textStream) {
+      if (isFirstChunk) {
+        globalSpinner.stop();
+        isFirstChunk = false;
+      }
       process.stdout.write(chunk);
       fullText += chunk;
     }
+    globalSpinner.stop();
     if (fullText.trim()) console.log("\n");
 
   }

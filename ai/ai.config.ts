@@ -143,6 +143,8 @@ async function ensureLocalServerRunning(): Promise<void> {
   throw new Error("Local AI server failed to start within 30 seconds.");
 }
 
+import { simulateStreamingMiddleware } from "ai";
+
 function getLocalModel(): LanguageModelV4 {
   const baseURL = process.env.LOCAL_MODEL_BASE_URL?.trim() || "http://127.0.0.1:8080/v1";
   const apiKey = process.env.LOCAL_MODEL_API_KEY?.trim() || "not-needed";
@@ -154,20 +156,125 @@ function getLocalModel(): LanguageModelV4 {
     baseURL,
     includeUsage: true,
   });
-  const internalModel = provider(modelId);
+  
+  const baseModel = provider(modelId);
+
+  const localToolFixMiddleware = {
+    wrapGenerate: async ({ doGenerate, params }: any) => {
+      const res = await doGenerate();
+      if (res.content && Array.isArray(res.content)) {
+        for (let i = 0; i < res.content.length; i++) {
+          const part = res.content[i];
+          if (part.type === "text" && part.text) {
+            // Find all JSON blocks with name and arguments
+            const regex = /\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*\{[\s\S]*?\}\s*\}/g;
+            const matches = [...part.text.matchAll(regex)];
+            
+            if (matches.length > 0) {
+              let textLeft = part.text;
+              const newParts: any[] = [];
+              let lastIndex = 0;
+
+              for (const match of matches) {
+                try {
+                  // Auto-repair hallucinated Python triple quotes (""") inside JSON
+                  let rawJson = match[0].replace(/:\s*"""([\s\S]*?)"""/g, (m: string, p1: string) => {
+                      let escaped = p1.replace(/(?<!\\)"/g, '\\"');
+                      escaped = escaped.replace(/\n/g, '\\n');
+                      escaped = escaped.replace(/\r/g, ''); 
+                      return ': "' + escaped + '"';
+                  });
+                  // Auto-repair single quotes to double quotes for keys/values if the model hallucinated Python dicts
+                  rawJson = rawJson.replace(/'([^']+)'\s*:/g, '"$1":');
+
+                  const parsed = JSON.parse(rawJson);
+                  if (parsed.name && parsed.arguments) {
+                    
+                    // Qwen 2.5 often over-escapes newlines in JSON strings, resulting in literal "\n" text
+                    // instead of actual newline characters. We must recursively unescape them.
+                    const unescapeLiteralNewlines = (val: any): any => {
+                      if (typeof val === 'string') {
+                        return val.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"');
+                      } else if (Array.isArray(val)) {
+                        return val.map(unescapeLiteralNewlines);
+                      } else if (val !== null && typeof val === 'object') {
+                        const newObj: any = {};
+                        for (const k in val) {
+                          newObj[k] = unescapeLiteralNewlines(val[k]);
+                        }
+                        return newObj;
+                      }
+                      return val;
+                    };
+                    
+                    parsed.arguments = unescapeLiteralNewlines(parsed.arguments);
+
+                    // Extract any text before this tool call
+                    const beforeText = part.text.substring(lastIndex, match.index).replace(/```json\s*$/, "").trim();
+                    if (beforeText) {
+                      newParts.push({ type: "text", text: beforeText });
+                    }
+                    
+                    const stringifiedArgs = typeof parsed.arguments === 'string' ? parsed.arguments : JSON.stringify(parsed.arguments);
+                    newParts.push({
+                      type: "tool-call",
+                      toolCallType: "function",
+                      toolCallId: `call_${Math.random().toString(36).substring(2, 9)}`,
+                      toolName: parsed.name,
+                      args: stringifiedArgs,
+                      input: stringifiedArgs,
+                    });
+                    
+                    lastIndex = match.index! + match[0].length;
+                  }
+                } catch (e) {
+                  // Ignore parse errors for this specific match
+                }
+              }
+              
+              if (newParts.length > 0) {
+                if (res.finishReason && res.finishReason.raw === "stop") {
+                  res.finishReason = { unified: "tool-calls", raw: "tool-calls" };
+                }
+                
+                // Add any remaining text
+                const afterText = part.text.substring(lastIndex).replace(/^```/, "").trim();
+                if (afterText) {
+                  newParts.push({ type: "text", text: afterText });
+                }
+                
+                // Replace the original text part with our new sequence of parts
+                res.content.splice(i, 1, ...newParts);
+                i += newParts.length - 1; // Advance iterator past the new parts
+              }
+            }
+          }
+        }
+      }
+      return res;
+    }
+  };
+
+  const internalModel = wrapLanguageModel({
+    model: baseModel,
+    middleware: [simulateStreamingMiddleware(), localToolFixMiddleware],
+  });
 
   return new Proxy(internalModel, {
     get(target, prop, receiver) {
       if (prop === 'doGenerate') {
         return async (options: Parameters<LanguageModelV4['doGenerate']>[0]) => {
           await ensureLocalServerRunning();
-          return internalModel.doGenerate(options as any);
+          // Force a high token limit so long tool calls (like create_file) don't get cut off midway
+          const newOptions = { ...options, maxOutputTokens: options.maxOutputTokens || 4096 };
+          return internalModel.doGenerate(newOptions as any);
         };
       }
       if (prop === 'doStream') {
         return async (options: Parameters<LanguageModelV4['doStream']>[0]) => {
           await ensureLocalServerRunning();
-          return internalModel.doStream(options as any);
+          const newOptions = { ...options, maxOutputTokens: options.maxOutputTokens || 4096 };
+          return internalModel.doStream(newOptions as any);
         };
       }
       return Reflect.get(target, prop, receiver);
@@ -297,4 +404,14 @@ When writing or editing code, follow these rules before producing output:
     tools (create_file, modify_file, delete_file). DO NOT output code 
     directly in markdown blocks if it is meant to be saved. You MUST 
     invoke the appropriate tool.
+
+11. SHELL EXECUTION: You have two shell tools. Use 'execute_shell_autonomous' ONLY for READ-ONLY commands like 'ls', 'git status', or 'npm test' so you can read the output immediately. Use the regular 'execute_shell' tool for mutating commands like 'npm install' or 'git reset' that must be staged for user approval.
+
+12. HANDLING VAGUE REQUESTS: If a user asks you to perform an action (e.g., 'create a folder', 'make a file') but does not specify a name, DO NOT ask them for the name. Instead, invent a reasonable, generic name (e.g., 'new_folder', 'test_script.py') and execute the tool immediately. It is always better to take action with a generic name than to do nothing.
+
+13. NO YAPPING: You MUST ALWAYS output the JSON tool call. DO NOT just say you did it. Actually execute the tool!
+
+14. SENIOR ENGINEER MODE: NEVER write basic, minimal, or lazy code. ALWAYS write robust, fully-featured code. (e.g., A "scientific calculator" MUST include trig, logs, constants, and error handling). Expand features automatically!
+
+15. CRITICAL JSON: Tool calls MUST use standard double quotes ("). Escape newlines as \\n. NEVER use Python triple quotes (""") in JSON.
 `;

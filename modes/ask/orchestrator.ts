@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { confirm, isCancel, text } from "@clack/prompts";
+import { confirm, isCancel, text, intro, outro, note } from "@clack/prompts";
 import { ToolLoopAgent, stepCountIs, tool } from "ai";
 import { z } from "zod";
 import { getAgentModel, SHARED_SYSTEM_PROMPT } from "../../ai/index.ts";
@@ -145,6 +145,18 @@ export async function runAskMode() {
   
   const answer = result.text?.trim() || "(no answer)";
   console.log("\n" + renderTerminalMarkdown(answer) + "\n");
+
+  try {
+    const usage = await (result as any).usage;
+    if (usage) {
+      const prompt = usage.promptTokens ?? 0;
+      const comp = usage.completionTokens ?? 0;
+      const total = usage.totalTokens ?? (prompt + comp);
+      if (total > 0) {
+        note(`Prompt: ${prompt}\nCompletion: ${comp}\nTotal: ${total}`, `📊 Token Consumption`);
+      }
+    }
+  } catch (e) {}
 
   const wantsSave = await confirm({
     message:"Save this answer to a .md file in the current directory?",

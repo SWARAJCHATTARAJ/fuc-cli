@@ -400,6 +400,47 @@ export class ToolExecutor {
     });
     return `Shell queued: ${command}`;
   }
+
+  runShellAutonomous(command: string): string {
+    if (!this.config.tools.allowShellExecution || process.env.FUC_ALLOW_SHELL !== "1")
+      throw new Error("Shell execution disabled. Set FUC_ALLOW_SHELL=1 to enable.");
+    
+    // SAFETY NET: Block commands that might mutate or harm the system
+    const DANGEROUS_PATTERNS = [
+      /\b(rm|del|erase|rmdir|rd)\b/i,
+      /\b(mv|move|cp|copy)\b/i,
+      />|>>/,
+      /\b(curl|wget|invoke-webrequest|iwr)\b/i,
+      /\b(npm|yarn|bun|pnpm|pip)\s+(install|i|add|remove|rm|uninstall)\b/i,
+      /\bgit\s+(commit|push|reset|clean|checkout|revert)\b/i,
+      /\b(format|diskpart|chmod|chown|attrib)\b/i,
+    ];
+
+    for (const pat of DANGEROUS_PATTERNS) {
+      if (pat.test(command)) {
+        return `ERROR: Command blocked by security policy! The 'execute_shell_autonomous' tool is restricted to READ-ONLY commands. To run '${command}', you MUST use the regular 'execute_shell' tool so the user can approve it.`;
+      }
+    }
+
+    const r = spawnSync(command, {
+      shell: true,
+      cwd: this.config.codebasePath,
+      encoding: "utf8",
+      maxBuffer: 4 * 1024 * 1024,
+      timeout: 30000,
+    });
+    
+    const out = `Exit code: ${r.status ?? "timeout"}\nStdout:\n${r.stdout || ""}\nStderr:\n${r.stderr || ""}`;
+    
+    this.tracker.log({
+      type: "code_analysis",
+      path: "shell_autonomous",
+      details: { after: out, toolName: "execute_shell_autonomous" },
+      status: "executed",
+    });
+    
+    return this.limitToolOutput(out, "execute_shell_autonomous");
+  }
   skillRoots(): string[] {
     const extra =
       process.env.SKILLS_DIRS?.split(/[;]/)

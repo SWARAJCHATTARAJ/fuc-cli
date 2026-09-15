@@ -7,7 +7,7 @@ export interface Spinner {
   addListener(fn: (label: string) => void): () => void;
 }
 
-const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const frames = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
 
 export function createSpinner(): Spinner {
   const isTTY = process.stdout.isTTY;

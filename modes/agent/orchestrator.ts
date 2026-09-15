@@ -1,4 +1,4 @@
-import { isCancel, text } from "@clack/prompts";
+import { isCancel, text, intro, outro, note } from "@clack/prompts";
 import chalk from "chalk";
 import { defaultAgentConfig } from "./types";
 import { ActionTracker } from "./action.tracker";
@@ -11,14 +11,17 @@ import { runApprovalFlow } from "./approval";
 import { globalSpinner } from "../../tui/spinner";
 
 export async function runAgentMode() {
-  console.log(chalk.bold("\n🤖 Agent Mode\n"));
+  intro(chalk.bgCyan.black(" 🤖 Autonomous Agent Mode "));
 
   const goal = await text({
     message: "What would you like the agent to do?",
-    placeholder: "Concrete task for this codebase…",
+    placeholder: "E.g. Create a new Next.js component...",
   });
 
-  if (isCancel(goal) || !goal.trim()) return;
+  if (isCancel(goal) || !goal.trim()) {
+    outro(chalk.dim("Canceled."));
+    return;
+  }
 
   const config = defaultAgentConfig();
   const tracker = new ActionTracker();
@@ -37,30 +40,59 @@ export async function runAgentMode() {
   });
 
 
-  globalSpinner.start("Thinking…");
+  globalSpinner.start("Agent is thinking...");
   const result = await agent.stream({
     prompt: goal.trim(),
     onStepFinish: ({ toolCalls }) => {
       globalSpinner.stop();
       for (const tc of toolCalls) {
-        const preview = JSON.stringify(tc.input).slice(0, 160);
+        let preview = "";
+        try {
+          const input = tc.input as any;
+          if (tc.toolName === 'execute_shell' || tc.toolName === 'execute_shell_autonomous') preview = String(input.command || '');
+          else if (tc.toolName === 'create_file' || tc.toolName === 'modify_file') preview = `${input.path} (${String(input.content || '').length} bytes)`;
+          else preview = String(input.path || input.root || JSON.stringify(input));
+        } catch { preview = JSON.stringify(tc.input); }
+        
+        preview = preview.slice(0, 80);
         console.log(
-          chalk.green("  ✓"),
+          chalk.cyan("  ↳"),
           chalk.bold(String(tc.toolName)),
-          chalk.dim(preview + (preview.length >= 160 ? "..." : "")),
+          chalk.dim(preview + (preview.length >= 80 ? "..." : "")),
         );
       }
-      globalSpinner.start("Thinking…");
+      globalSpinner.start("Agent is working...");
     },
   });
   globalSpinner.stop();
 
   let fullText = "";
+  let isFirstChunk = true;
   for await (const chunk of result.textStream) {
+    if (isFirstChunk) {
+      globalSpinner.stop();
+      console.log(chalk.dim("\n  ─ Response ──────────────────────────────\n"));
+      isFirstChunk = false;
+    }
     process.stdout.write(chunk);
     fullText += chunk;
   }
-  if (fullText.trim()) console.log("\n");
+  
+  globalSpinner.stop(); 
+  
+  if (fullText.trim()) console.log(chalk.dim("\n  ─────────────────────────────────────────\n"));
+
+  try {
+    const usage = await (result as any).usage;
+    if (usage) {
+      const prompt = usage.promptTokens ?? 0;
+      const comp = usage.completionTokens ?? 0;
+      const total = usage.totalTokens ?? (prompt + comp);
+      if (total > 0) {
+        note(`Prompt: ${prompt}\nCompletion: ${comp}\nTotal: ${total}`, `📊 Token Consumption`);
+      }
+    }
+  } catch (e) {}
 
   const ok = await runApprovalFlow(tracker);
   if (!ok) return executor.clearStaging();
@@ -68,12 +100,10 @@ export async function runAgentMode() {
   const { errors } = executor.applyApprovedFromTracker();
 
   if (errors.length) {
-    console.log(chalk.red("\nSome operations reported errors:\n"));
-    for (const e of errors) console.log(chalk.red(`  • ${e}`));
-  }
-  else{
-   console.log(chalk.green('\n✓ Applied.\n'));
+    note(errors.map(e => `• ${e}`).join("\n"), chalk.red("Errors occurred"));
+  } else {
+    outro(chalk.green("✨ All changes successfully applied to workspace."));
   }
 
-  executor.clearStaging()
+  executor.clearStaging();
 }

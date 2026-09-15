@@ -95,11 +95,20 @@ export function createAgentTools(executor: ToolExecutor) {
 
     execute_shell: tool({
       description:
-        "Queue a shell command to run in the workspace after user approval. Use with care.",
+        "Queue a shell command to run in the workspace after user approval. Use for mutations (npm install, rm, git reset, etc).",
       inputSchema: z.object({
         command: z.string().describe("Single command; runs with shell: true"),
       }),
-      execute: async ({ command }) => withSpinner("Running command…", () => executor.queueShell(command)),
+      execute: async ({ command }) => withSpinner("Queuing command…", () => executor.queueShell(command)),
+    }),
+
+    execute_shell_autonomous: tool({
+      description:
+        "Run a READ-ONLY shell command immediately to debug or explore (e.g. ls, git status, npm test). Returns stdout/stderr instantly.",
+      inputSchema: z.object({
+        command: z.string().describe("Single read-only command; runs with shell: true"),
+      }),
+      execute: async ({ command }) => withSpinner("Running command…", () => executor.runShellAutonomous(command)),
     }),
 
     list_skills: tool({

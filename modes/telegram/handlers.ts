@@ -151,7 +151,8 @@ export function registerHandlers(bot: Telegraf) {
     const s = approvalSessions.get(ctx.chat!.id);
     if (!s) return ctx.answerCbQuery();
     await ctx.answerCbQuery();
-    await ctx.reply(clip(approvalDiff(s.pending)));
+    const rawDiff = clip(approvalDiff(s.pending), 3900); // Leave room for markdown
+    await ctx.reply('```diff\n' + rawDiff + '\n```', { parse_mode: 'Markdown' });
   });
 
   bot.action('approval_accept', async (ctx) => {

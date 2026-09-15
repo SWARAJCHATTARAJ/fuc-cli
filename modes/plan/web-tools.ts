@@ -13,7 +13,7 @@ function getClient(): Firecrawl {
   return client;
 }
 
-function clip(s: string, n = 8000): string {
+function clip(s: string, n = 4000): string {
   return s.length > n ? s.slice(0, n) + "\n…[truncated]" : s;
 }
 
@@ -80,7 +80,7 @@ export function createWebTools(tracker: ActionTracker) {
     execute: async ({ url }) => {
       const r = await fetch(url, { redirect: 'follow' });
       const body = await r.text();
-      const out = clip(body, 16_000);
+      const out = clip(body, 8000);
       tracker.log({
         type: 'code_analysis',
         path: `fetch:${url}`,
