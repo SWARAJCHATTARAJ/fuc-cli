@@ -6,24 +6,25 @@ Built on Bun and TypeScript, using the Vercel AI SDK for the agent loop and Tele
 
 ## What it does
 
-- **Terminal launcher** with Ask, Plan, and Agent modes.
-- **Telegram bot** that mirrors the same workflows from your phone.
+- **Terminal launcher** with Ask, Plan, and Agent modes featuring a highly polished, Vercel-style TUI (`@clack/prompts`).
+- **Telegram bot** that mirrors the same workflows from your phone with a mobile-optimized UI (numbered grids, markdown code block diffs).
+- **Cloud-to-Local Auto Fallback**: If your cloud provider (like Groq) hits a rate limit or goes offline, the CLI will seamlessly and silently failover to your local offline model to finish the task.
 - **Human approval gate** before any file, folder, or shell mutation is applied.
-- **Live status while it works** — a terminal spinner with elapsed time and streamed token output in the terminal, and a Telegram typing indicator with a periodically updated status message, so you're not staring at a blank screen during a model call or tool run.
+- **Live status & Token Tracking** — a terminal spinner with elapsed time, streamed output, and a visual **Token Consumption Tracker** at the end of every task so you can easily monitor your API limits.
 - **Telegram sessions expire on their own** after 15 minutes of inactivity, and can be cancelled explicitly with `/cancel`.
-- **Optional web research** through Firecrawl, when configured.
+- **Optional web research** through Firecrawl, when configured (automatically clipped to protect against massive token usage).
 
 ## How a request flows
 
-```
+```text
 CLI or Telegram request
         |
         v
 AI SDK agent + selected tools
         |
-        +-- reads / analysis --> immediate result
+        +-- reads / analysis / web search / read-only shell --> immediate result
         |
-        +-- file, folder, shell mutation --> staged, pending approval
+        +-- file, folder, mutating shell command --> staged, pending approval
                                                 |
                                                 v
                                       you approve or reject
@@ -32,7 +33,7 @@ AI SDK agent + selected tools
                                      approved actions get applied
 ```
 
-Reads happen immediately. Anything that changes your workspace gets staged first and waits for a yes.
+Reads and diagnostic commands happen immediately. Anything that mutates your workspace gets staged first and waits for a yes.
 
 ## Modes
 
@@ -66,7 +67,7 @@ Copy `.env.example` to `.env` and fill in what you need. Ensure only one `AI_PRO
 | `OPENROUTER_API_KEY` | OpenRouter | required when `AI_PROVIDER=openrouter` |
 | `OPENROUTER_DEFAULT_MODEL` | OpenRouter | optional; code permits `openrouter/free` or any model ID ending in `:free` |
 | `GROQ_API_KEY` | Groq | required when `AI_PROVIDER=groq` |
-| `GROQ_DEFAULT_MODEL` | Groq | optional; defaults to `openai/gpt-oss-20b` |
+| `GROQ_DEFAULT_MODEL` | Groq | optional; defaults to `llama-3.1-70b-versatile` |
 | `LOCAL_MODEL_BASE_URL` | Local | optional; defaults to `http://127.0.0.1:8080/v1` |
 | `LOCAL_MODEL_NAME` | Local | optional |
 | `LOCAL_MODEL_API_KEY` | Local | optional |
